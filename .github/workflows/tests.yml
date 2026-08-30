@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [postverify, posttime, imagematch]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ${{ matrix.service }}/requirements.txt
+
+      - name: Install
+        working-directory: ${{ matrix.service }}
+        run: pip install -r requirements.txt
+
+      # Koi test browser ya network nahi chhoota — CI me Chrome ki zaroorat nahi.
+      - name: Test
+        working-directory: ${{ matrix.service }}
+        run: pytest -q

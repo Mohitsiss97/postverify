@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PostVerify</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --line-soft:#eef0f3;
+    --ink:#12161c; --muted:#68727f; --faint:#98a2ae;
+    --accent:#0084cc; --accent-soft:#e6f4fb;
+    --ok:#12855b; --ok-soft:#e4f5ee; --warn:#a8620a; --warn-soft:#fdf1e2;
+    --bad:#c02a2a; --bad-soft:#fdecec;
+    --radius:12px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d1014; --panel:#141922; --line:#242c38; --line-soft:#1c2330;
+      --ink:#e8ecf1; --muted:#93a0b0; --faint:#65717f;
+      --accent:#3aaee6; --accent-soft:#11293a;
+      --ok:#4bd39b; --ok-soft:#0f2a20; --warn:#e8a55c; --warn-soft:#2b1f10;
+      --bad:#f08a8a; --bad-soft:#2c1414;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px;margin:0 auto;padding:44px 20px 80px}
+  header{margin-bottom:28px}
+  h1{margin:0;font-size:27px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin-top:7px;font-size:14px}
+
+  .card{background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:18px}
+  .card + .card{margin-top:12px}
+  section + section, section + .card{margin-top:12px}
+  label.field{display:block;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;margin-bottom:8px}
+  .optional{font-size:12px;color:var(--faint);font-weight:400;
+    text-transform:none;letter-spacing:0}
+  input[type=url]{width:100%;padding:12px 13px;border:1px solid var(--line);
+    border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+  input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  .chip{display:inline-block;margin-top:9px;font-size:12px;font-weight:600;
+    padding:3px 10px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+  .chip.none{background:var(--line-soft);color:var(--faint)}
+  .chip.busy{background:var(--warn-soft);color:var(--warn)}
+
+  .drop{margin-top:6px;border:1.5px dashed var(--line);border-radius:var(--radius);
+    padding:22px 16px;text-align:center;cursor:pointer;background:var(--bg);
+    transition:border-color .12s,background .12s}
+  .drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+  .drop p{margin:0;font-size:13.5px;color:var(--muted)}
+  .drop strong{color:var(--accent)}
+  .mine{display:flex;gap:14px;align-items:center;text-align:left}
+  .mine img{width:76px;height:76px;object-fit:cover;border-radius:10px;
+    border:1px solid var(--line);flex:none}
+  .mine .meta{font-size:13px;color:var(--muted);min-width:0}
+  .mine .meta b{display:block;color:var(--ink);font-size:14px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  button.go{margin-top:18px;padding:13px 22px;border:0;border-radius:10px;
+    background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer;width:100%}
+  button.go:disabled{opacity:.5;cursor:default}
+  .link{background:none;border:0;color:var(--accent);font:inherit;font-size:13px;
+    cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px}
+  .samples{margin-top:12px;font-size:12.5px;color:var(--faint);
+    display:flex;gap:12px;flex-wrap:wrap}
+
+  .when{font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.25}
+  .when small{display:block;font-size:13px;font-weight:500;color:var(--muted);
+    margin-top:7px;letter-spacing:0}
+  .age{display:inline-block;margin-top:11px;font-size:12.5px;color:var(--muted);
+    background:var(--line-soft);padding:3px 10px;border-radius:99px}
+
+  .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+    gap:10px;margin-top:16px}
+  .shot{position:relative;border:1px solid var(--line);border-radius:10px;
+    overflow:hidden;background:var(--bg)}
+  .shot img{display:block;width:100%;height:130px;object-fit:cover}
+  .shot span{position:absolute;left:0;right:0;bottom:0;padding:4px 7px;font-size:10.5px;
+    background:rgba(0,0,0,.62);color:#fff}
+  .shot.page span{background:rgba(168,98,10,.88)}
+
+  .scorewrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .bignum{font-size:40px;font-weight:700;letter-spacing:-.03em;line-height:1}
+  .bignum small{font-size:18px;font-weight:600}
+  .yes{color:var(--ok)} .no{color:var(--bad)} .maybe{color:var(--warn)}
+  .bar{flex:1 1 180px;height:9px;border-radius:99px;background:var(--line-soft);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;background:currentColor}
+  .headline{font-size:16px;font-weight:600;margin:14px 0 0}
+  .pair{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
+  .pair figure{margin:0;flex:1 1 140px}
+  .pair img{width:100%;border-radius:10px;border:1px solid var(--line);display:block}
+  .pair figcaption{font-size:12px;color:var(--faint);margin-top:6px}
+
+  dl{display:grid;grid-template-columns:auto 1fr;gap:7px 18px;margin:16px 0 0;
+    padding-top:14px;border-top:1px solid var(--line-soft);font-size:13px}
+  dt{color:var(--faint)} dd{margin:0;word-break:break-all}
+  dd a{color:var(--accent)}
+  .warnbox{margin-top:14px;font-size:13px;color:var(--warn);
+    background:var(--warn-soft);padding:10px 12px;border-radius:9px}
+  .cleaned{margin-top:16px;padding-top:12px;border-top:1px solid var(--line-soft);
+    font-size:12.5px;color:var(--faint)}
+  .err{border-color:var(--bad);background:var(--bad-soft)}
+  .err h3{margin:0 0 6px;font-size:14px;color:var(--bad)}
+  .err p{margin:0;font-size:13.5px}
+  footer{margin-top:36px;font-size:12.5px;color:var(--faint);text-align:center}
+  footer a{color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PostVerify</h1>
+    <div class="sub">Post ka URL daalo &mdash; kab upload hua pata chal jayega. Image bhi do to bata denge wo is post me hai ya nahi.</div>
+  </header>
+
+  <div class="card">
+    <label class="field" for="url">Post ka URL</label>
+    <input type="url" id="url" placeholder="https://" autocomplete="off" spellcheck="false">
+    <div id="chip"></div>
+
+    <label class="field" for="file" style="margin-top:20px">
+      Apni image <span class="optional">&mdash; jise post se milana hai (optional: sirf time chahiye to chhod do)</span>
+    </label>
+    <div class="drop" id="drop">
+      <p><strong>Click karo</strong> ya image yahan drag karo</p>
+    </div>
+    <input type="file" id="file" accept="image/*" hidden>
+
+    <button class="go" id="go" disabled>Check karo</button>
+    <div class="samples" id="samples"></div>
+  </div>
+
+  <section id="post"></section>
+  <section id="out"></section>
+  <footer><a href="/docs">API docs</a></footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ESCAPES[c]);
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+// Public deployment pe ACCESS_TOKEN set hota hai. Link me ?token=... do,
+// wo yaad rakh liya jaata hai taaki har baar daalna na pade.
+const TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get("token");
+  try {
+    if (fromUrl) localStorage.setItem("pv_token", fromUrl);
+    return fromUrl || localStorage.getItem("pv_token") || "";
+  } catch (e) { return fromUrl || ""; }
+})();
+
+let platforms = [];
+let prepared = null;          // /prepare ka result
+let blobs = {};               // /media/... -> browser me utari hui copy
+let picked = null, previewURL = null;
+
+async function boot() {
+  try {
+    platforms = (await (await fetch("/platforms")).json()).platforms || [];
+  } catch (e) { return; }
+  $("#samples").innerHTML = "Sample: " + platforms.map(p =>
+    `<button class="link" data-url="${esc(p.sample_url)}">${esc(p.label)}</button>`).join("");
+  $("#samples").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (b) { $("#url").value = b.dataset.url; onUrl(); }
+  });
+  const pre = new URLSearchParams(location.search).get("url");
+  if (pre) { $("#url").value = pre; onUrl(); run(); }
+}
+
+function detect(value) {
+  let host;
+  try {
+    host = new URL(/^https?:\/\//i.test(value) ? value : "https://" + value).hostname.toLowerCase();
+  } catch (e) { return null; }
+  if (host.startsWith("www.")) host = host.slice(4);
+  return platforms.find(p => (p.hosts || []).includes(host)) || null;
+}
+
+// --- data mitane ke raaste ----------------------------------------------
+
+function releaseBlobs() {
+  Object.values(blobs).forEach(URL.revokeObjectURL);
+  blobs = {};
+}
+
+function dropSession(token) {
+  if (!token) return;
+  fetch("/session/" + token, {method: "DELETE"}).catch(() => {});
+}
+
+function resetPost() {
+  if (prepared) dropSession(prepared.session);
+  prepared = null;
+  releaseBlobs();
+  $("#post").innerHTML = "";
+  $("#out").innerHTML = "";
+}
+
+// Tab band ho ya reload ho — jo data bacha hai, server ko mitane ko keh do.
+addEventListener("pagehide", () => {
+  if (!prepared) return;
+  const path = "/session/" + prepared.session;
+  if (navigator.sendBeacon) navigator.sendBeacon(path);
+  else dropSession(prepared.session);
+});
+
+// --- ek hi flow: URL (+ image) -> time -> match -------------------------
+
+let lastUrl = null, busy = false;
+
+function onUrl() {
+  const value = $("#url").value.trim();
+  const p = value ? detect(value) : null;
+  $("#chip").innerHTML = !value ? ""
+    : p ? `<span class="chip">${esc(p.label)} pehchana gaya</span>`
+        : `<span class="chip none">Ye link kis platform ka hai, samajh nahi aaya</span>`;
+  if (value !== lastUrl) { resetPost(); lastUrl = null; }
+  refresh();
+}
+$("#url").addEventListener("input", onUrl);
+$("#url").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+
+function refresh() {
+  $("#go").disabled = busy || !$("#url").value.trim();
+  $("#go").textContent = busy ? "…" : (picked ? "Check karo" : "Sirf time nikalo");
+}
+
+async function run() {
+  const value = $("#url").value.trim();
+  const p = detect(value);
+  if (!value || busy) return;
+  if (!p) { showError({message: "Ye link kis platform ka hai, samajh nahi aaya."}); return; }
+
+  busy = true;
+  refresh();
+  resetPost();
+  lastUrl = value;
+  $("#chip").innerHTML = `<span class="chip busy">${esc(p.label)} &mdash; post kholi ja rahi hai${
+    p.needs_browser ? ", 8-18 second" : ""}…</span>`;
+
+  // Kadam 1: time + post ki images. Milte hi dikha do — image compare
+  // ka intezaar nahi karvana.
+  const body = new FormData();
+  body.append("url", value);
+  body.append("tz", TZ);
+  if (TOKEN) body.append("token", TOKEN);
+  try {
+    const r = await fetch("/prepare", {method: "POST", body});
+    const d = await r.json();
+    if (!r.ok) {
+      showError(d.detail || {message: "Kuch galat ho gaya."});
+      $("#chip").innerHTML = `<span class="chip none">${esc(p.label)} — nahi khul payi</span>`;
+      lastUrl = null;
+      return;
+    }
+    prepared = d;
+    $("#chip").innerHTML = `<span class="chip">${esc(p.label)} pehchana gaya</span>`;
+    await showPost(d);
+  } catch (e) {
+    showError({message: "Service tak request nahi pahunchi."});
+    lastUrl = null;
+    return;
+  } finally {
+    busy = false;
+    refresh();
+  }
+
+  // Kadam 2: image di hai to compare — ab turant, kyunki images maujood hain.
+  if (picked && prepared) await compareNow();
+}
+
+async function compareNow() {
+  if (!prepared || !picked) return;
+  busy = true;
+  refresh();
+  $("#out").innerHTML = `<div class="card"><p class="sub" style="margin:0">Compare ho raha hai…</p></div>`;
+  const body = new FormData();
+  body.append("session", prepared.session);
+  body.append("image", picked);
+  if (TOKEN) body.append("token", TOKEN);
+  try {
+    const r = await fetch("/verify", {method: "POST", body});
+    const d = await r.json();
+    if (r.ok) {
+      showResult(d);
+      prepared = null;          // server ne data delete kar diya
+      lastUrl = null;
+    } else {
+      showError(d.detail || {message: "Kuch galat ho gaya."});
+    }
+  } catch (e) {
+    showError({message: "Service tak request nahi pahunchi."});
+  } finally {
+    busy = false;
+    refresh();
+  }
+}
+
+$("#go").onclick = run;
+
+// Images browser me utaar lo — check ke baad server inhe delete kar dega,
+// par result me tab bhi dikhani hain.
+async function cacheImages(images) {
+  await Promise.all((images || []).map(async img => {
+    try {
+      const r = await fetch(img.url);
+      if (r.ok) blobs[img.url] = URL.createObjectURL(await r.blob());
+    } catch (e) {}
+  }));
+}
+
+async function showPost(d) {
+  let html = "";
+  if (d.time) {
+    const when = new Date(d.time.published_at_local || d.time.published_at);
+    const pretty = when.toLocaleString(undefined, {
+      weekday: "short", day: "numeric", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit"});
+    html += `<label class="field">Upload kab hua</label>
+      <div class="when">${esc(pretty)}
+        <small>${esc(d.time.timezone || TZ)} &middot; UTC me ${esc(d.time.published_at)}</small>
+      </div>
+      <span class="age">${esc(d.time.age_human)}</span>`;
+  } else if (d.time_error) {
+    html += `<div class="warnbox">Upload time nahi mila: ${esc(d.time_error)}</div>`;
+  }
+
+  await cacheImages(d.images);
+
+  if (d.images && d.images.length) {
+    html += `<label class="field" style="margin-top:18px">Post ki original image</label>
+      <div class="shots">` + d.images.map(img => `
+      <div class="shot ${img.tier === "post" ? "" : "page"}">
+        <img src="${esc(blobs[img.url] || img.url)}" alt="">
+        <span>${img.tier === "post" ? "post ki image" : "page pe mili"}</span>
+      </div>`).join("") + `</div>`;
+  } else if (d.image_error) {
+    html += `<div class="warnbox">Post ki image nahi mili: ${esc(d.image_error)}</div>`;
+  }
+
+  html += `<dl>
+      <dt>Platform</dt><dd>${esc(d.platform_label)}</dd>
+      <dt>Post ID</dt><dd>${esc(d.post_id)}</dd>
+      <dt>Post</dt><dd><a href="${esc(d.canonical_url)}" target="_blank" rel="noopener noreferrer">${esc(d.canonical_url)}</a></dd>
+    </dl>`;
+
+  $("#post").innerHTML = `<div class="card">${html}</div>`;
+}
+
+// --- apni image ---------------------------------------------------------
+
+const drop = $("#drop"), fileInput = $("#file");
+drop.onclick = () => fileInput.click();
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("over");
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", () => {
+  if (fileInput.files[0]) setFile(fileInput.files[0]);
+});
+
+function setFile(f) {
+  picked = f;
+  if (previewURL) URL.revokeObjectURL(previewURL);
+  previewURL = URL.createObjectURL(f);
+  drop.innerHTML = `<div class="mine"><img src="${previewURL}" alt="">
+    <div class="meta"><b>${esc(f.name)}</b>${Math.round(f.size / 1024)} KB &middot; badalne ke liye click karo</div></div>`;
+  refresh();
+  // Post pehle se khuli hai to seedha compare kar do — dobara kholne ki zaroorat nahi.
+  if (prepared && !busy) compareNow();
+}
+
+const HEAD = {
+  identical: ["Haan — bilkul wahi image", "yes"],
+  same: ["Haan — ye image is post me hai", "yes"],
+  likely: ["Shayad — pakka nahi", "maybe"],
+  different: ["Nahi — ye image is post me nahi mili", "no"]
+};
+
+function showResult(d) {
+  const [title, cls] = HEAD[d.verdict] || ["Result", ""];
+  const m = d.matched;
+  const shot = m ? (blobs[m.url] || m.url) : null;
+  $("#out").innerHTML = `
+    <div class="card">
+      <div class="scorewrap ${cls}">
+        <div class="bignum ${cls}">${d.score == null ? "-" : d.score}<small>%</small></div>
+        <div class="bar ${cls}"><i style="width:${Math.max(d.score || 0, 2)}%"></i></div>
+      </div>
+      <p class="headline ${cls}">${esc(title)}</p>
+      <p class="sub" style="margin:6px 0 0">${esc(d.summary)}</p>
+      ${m && shot ? `<div class="pair">
+        <figure><img src="${previewURL}" alt=""><figcaption>Aapki image</figcaption></figure>
+        <figure><img src="${esc(shot)}" alt=""><figcaption>${
+          m.tier === "post" ? "Post ki image" : "Page pe mili image"}</figcaption></figure>
+      </div>` : ""}
+      <dl>
+        <dt>Images check ki</dt><dd>${d.images_checked}</dd>
+        ${m ? `<dt>Kahan mili</dt><dd>${m.tier === "post"
+          ? "Post ki apni image" : "Post page pe (carousel ya related post ho sakti hai)"}</dd>` : ""}
+      </dl>
+      ${d.cleaned_up ? `<p class="cleaned">Post ki downloaded images server se delete kar di gayi hain.
+        Aapki apni image kabhi disk pe likhi hi nahi gayi.</p>` : ""}
+    </div>`;
+}
+
+function showError(d) {
+  $("#out").innerHTML = `<div class="card err">
+      <h3>Nahi ho paya</h3>
+      <p>${esc(d.message || "")}</p>
+    </div>`;
+}
+
+boot();
+</script>
+</body>
+</html>

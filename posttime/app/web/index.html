@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PostTime</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --line-soft:#eef0f3;
+    --ink:#12161c; --muted:#68727f; --faint:#98a2ae;
+    --accent:#0084cc; --accent-soft:#e6f4fb;
+    --ok:#12855b; --ok-soft:#e4f5ee; --warn:#a8620a; --warn-soft:#fdf1e2;
+    --bad:#c02a2a; --bad-soft:#fdecec;
+    --radius:12px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d1014; --panel:#141922; --line:#242c38; --line-soft:#1c2330;
+      --ink:#e8ecf1; --muted:#93a0b0; --faint:#65717f;
+      --accent:#3aaee6; --accent-soft:#11293a;
+      --ok:#4bd39b; --ok-soft:#0f2a20; --warn:#e8a55c; --warn-soft:#2b1f10;
+      --bad:#f08a8a; --bad-soft:#2c1414;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px}
+  header{margin-bottom:32px}
+  h1{margin:0;font-size:26px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin-top:6px;font-size:14px}
+
+  .step{margin-bottom:26px}
+  .step-label{
+    font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;margin-bottom:10px;display:flex;gap:8px;align-items:center;
+  }
+  .step-label b{
+    background:var(--line-soft);color:var(--muted);width:18px;height:18px;border-radius:50%;
+    display:grid;place-items:center;font-size:10px;font-weight:700;
+  }
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  .pf{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:12px 14px;text-align:left;cursor:pointer;font:inherit;color:inherit;
+    display:flex;align-items:center;gap:9px;transition:border-color .12s,background .12s;
+  }
+  .pf:hover{border-color:var(--accent)}
+  .pf[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)}
+  .dot.warn{background:var(--warn)}
+  .pf-name{font-weight:600;font-size:14px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .how{font-size:13.5px;color:var(--muted);margin:0}
+  .how + .how{margin-top:8px}
+  .badge{
+    display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;
+    background:var(--ok-soft);color:var(--ok);margin-bottom:8px;
+  }
+  .badge.warn{background:var(--warn-soft);color:var(--warn)}
+
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  input[type=url]{
+    flex:1 1 260px;min-width:0;padding:11px 13px;border:1px solid var(--line);
+    border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;
+  }
+  input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  button.go{
+    padding:11px 20px;border:0;border-radius:10px;background:var(--accent);color:#fff;
+    font:inherit;font-weight:600;cursor:pointer;
+  }
+  button.go:disabled{opacity:.55;cursor:default}
+  .link{
+    background:none;border:0;color:var(--accent);font:inherit;font-size:13px;
+    cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px;text-align:left;
+  }
+  .hint{font-size:12.5px;color:var(--faint);margin-top:9px;word-break:break-all}
+
+  .out{margin-top:22px}
+  .when{font-size:30px;font-weight:650;letter-spacing:-.02em;line-height:1.2}
+  .when small{display:block;font-size:13px;font-weight:500;color:var(--muted);margin-top:6px;letter-spacing:0}
+  .age{
+    display:inline-block;margin-top:12px;font-size:12.5px;color:var(--muted);
+    background:var(--line-soft);padding:3px 10px;border-radius:99px;
+  }
+  dl{display:grid;grid-template-columns:auto 1fr;gap:7px 18px;margin:16px 0 0;
+     padding-top:14px;border-top:1px solid var(--line-soft);font-size:13px}
+  dt{color:var(--faint)}
+  dd{margin:0;word-break:break-all}
+  dd a{color:var(--accent)}
+
+  .err{border-color:var(--bad);background:var(--bad-soft)}
+  .err h3{margin:0 0 6px;font-size:14px;color:var(--bad)}
+  .err p{margin:0;font-size:13.5px}
+  .err .fixrow{margin-top:12px}
+  footer{margin-top:40px;font-size:12.5px;color:var(--faint);text-align:center}
+  footer a{color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PostTime</h1>
+    <div class="sub">Post ka URL do &mdash; pata chal jayega kab upload hua tha.</div>
+  </header>
+
+  <section class="step">
+    <div class="step-label"><b>1</b> Platform chuno</div>
+    <div class="grid" id="picker"><p class="how" style="grid-column:1/-1">Loading&hellip;</p></div>
+  </section>
+
+  <section class="step" id="detail-step" hidden>
+    <div class="step-label"><b>2</b> URL daalo</div>
+    <div class="card">
+      <span class="badge" id="badge"></span>
+      <p class="how" id="how"></p>
+      <p class="how" id="setup" hidden></p>
+      <div class="row" style="margin-top:14px">
+        <input type="url" id="url" placeholder="https://" autocomplete="off" spellcheck="false">
+        <button class="go" id="go">Time nikalo</button>
+      </div>
+      <div class="hint">Sample: <button class="link" id="sample"></button></div>
+    </div>
+  </section>
+
+  <section class="out" id="out"></section>
+
+  <footer>Timezone: <span id="tzname"></span> &middot; <a href="/docs">API docs</a></footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+$("#tzname").textContent = TZ;
+
+const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ESCAPES[c]);
+
+let platforms = [];
+let current = null;
+
+async function boot() {
+  try {
+    const r = await fetch("/platforms");
+    platforms = (await r.json()).platforms || [];
+  } catch (e) {
+    $("#picker").innerHTML = "<p class=\"how\" style=\"grid-column:1/-1\">Service se connect nahi ho paya.</p>";
+    return;
+  }
+  $("#picker").innerHTML = platforms.map(p => `
+    <button class="pf" data-id="${esc(p.id)}" aria-pressed="false"
+            title="${p.ready ? "Ready" : "Setup chahiye: " + esc(p.setup_env)}">
+      <span class="dot ${p.ready ? "" : "warn"}"></span>
+      <span class="pf-name">${esc(p.label)}</span>
+    </button>`).join("");
+  $("#picker").addEventListener("click", e => {
+    const btn = e.target.closest(".pf");
+    if (btn) select(btn.dataset.id);
+  });
+  restore();
+}
+
+// Deep link: /#x  ya  /?platform=x&url=https://...  — share aur bookmark ke liye
+function restore() {
+  const params = new URLSearchParams(location.search);
+  const wanted = (location.hash || "").slice(1) || params.get("platform");
+  if (wanted && platforms.some(p => p.id === wanted)) select(wanted);
+  const pre = params.get("url");
+  if (pre && current) {
+    $("#url").value = pre;
+    run();
+  }
+}
+
+function select(id) {
+  current = platforms.find(p => p.id === id);
+  if (!current) return;
+  document.querySelectorAll(".pf").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.id === id)));
+
+  $("#detail-step").hidden = false;
+  $("#badge").textContent = current.ready ? "Chal raha hai" : "Setup chahiye";
+  $("#badge").className = current.ready ? "badge" : "badge warn";
+  $("#how").textContent = current.how;
+  $("#setup").hidden = current.ready || !current.setup_note;
+  $("#setup").textContent = current.setup_note || "";
+  $("#sample").textContent = current.sample_url;
+  $("#url").placeholder = current.sample_url;
+  $("#out").innerHTML = "";
+  history.replaceState(null, "", "#" + id);
+  $("#url").focus();
+}
+
+$("#sample").onclick = () => { $("#url").value = current.sample_url; run(); };
+$("#go").onclick = run;
+$("#url").addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+
+async function run() {
+  const url = $("#url").value.trim();
+  if (!url || !current) return;
+  const go = $("#go");
+  go.disabled = true;
+  go.textContent = "…";
+  // Browser waale platforms 5-8 second lete hain — user ko khali screen na dikhe
+  $("#out").innerHTML = current.method === "headless-page"
+    ? '<div class="card"><p class="how">Page browser me render ho raha hai — 5-8 second lagenge…</p></div>'
+    : "";
+  try {
+    const r = await fetch("/" + current.id + "/resolve", {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({url: url, tz: TZ})
+    });
+    const body = await r.json();
+    if (r.ok) showResult(body);
+    else showError(body.detail || {message: "Kuch galat ho gaya."});
+  } catch (e) {
+    showError({message: "Service tak request nahi pahunchi."});
+  } finally {
+    go.disabled = false;
+    go.textContent = "Time nikalo";
+  }
+}
+
+function showResult(d) {
+  const when = new Date(d.published_at_local || d.published_at);
+  const pretty = when.toLocaleString(undefined, {
+    weekday: "short", day: "numeric", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
+  const HOW = {
+    "id-embedded": "ID ke andar se (offline, koi API call nahi)",
+    "public-page": "Public page se (koi key, koi login nahi)",
+    "headless-page": "Public page browser me render karke (koi login nahi)",
+    "api": "Platform ki official API se"
+  };
+  const how = HOW[d.method] || d.method;
+  $("#out").innerHTML = `
+    <div class="card">
+      <div class="when">${esc(pretty)}
+        <small>${esc(d.timezone || TZ)} &middot; UTC me ${esc(d.published_at)}</small>
+      </div>
+      <span class="age">${esc(d.age_human)}</span>
+      <dl>
+        <dt>Platform</dt><dd>${esc(d.platform_label)}</dd>
+        <dt>Post ID</dt><dd>${esc(d.post_id)}</dd>
+        <dt>Kaise mila</dt><dd>${esc(how)}</dd>
+        <dt>Precision</dt><dd>${esc(d.precision)}</dd>
+        <dt>Post</dt><dd><a href="${esc(d.canonical_url)}" target="_blank" rel="noopener noreferrer">${esc(d.canonical_url)}</a></dd>
+      </dl>
+    </div>`;
+}
+
+function showError(d) {
+  const wrong = d.error === "wrong_platform";
+  const other = wrong ? platforms.find(p => p.id === d.actual) : null;
+  $("#out").innerHTML = `
+    <div class="card err">
+      <h3>${wrong ? "Platform match nahi kiya" : "Timestamp nahi mila"}</h3>
+      <p>${esc(d.message || "")}</p>
+      ${other ? `<div class="fixrow"><button class="link" id="switch">${esc(other.label)} pe switch karke dobara try karo</button></div>` : ""}
+    </div>`;
+  if (other) {
+    $("#switch").onclick = () => {
+      const u = $("#url").value;
+      select(other.id);
+      $("#url").value = u;
+      run();
+    };
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Test aur tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets — .env kabhi commit nahi hoti, .env.example hoti hai
+.env
+*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
