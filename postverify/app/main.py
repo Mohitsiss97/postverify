@@ -43,16 +43,53 @@ async def lifespan(app: FastAPI):
     store.drop_all()
 
 
+# /docs me groups isi order me dikhte hain — pehle wahi jo integrate karna hai.
+TAGS = [
+    {
+        "name": "Integration API",
+        "description": (
+            "**Yahi use kijiye.** Ek call, ek JSON jawab — session ki zaroorat nahi."
+            "\n\n"
+            "`within` se pooch sakte ho ki post kitna taaza hai: `1d,3d,7d,1m` bhejo "
+            "aur har window ka seedha true/false milega. Dhyan: yahan `m` = month hai, "
+            "minute nahi (minute ke liye `min`)."
+        ),
+    },
+    {
+        "name": "Browser flow",
+        "description": (
+            "Ye endpoints is service ke apne web page ke liye hain, do kadam me: "
+            "`/prepare` post kholta hai (mehenga kadam) aur images `/media/...` pe rakh "
+            "deta hai, phir `/verify` un pehle se downloaded images se compare karta hai "
+            "(turant)."
+            "\n\n"
+            "Integration ke liye ye asuvidhajanak hai — **Integration API** use kijiye."
+        ),
+    },
+    {
+        "name": "Meta",
+        "description": "Service kya support karti hai, aur abhi kitna data pada hai.",
+    },
+]
+
 app = FastAPI(
     title="PostVerify",
     version="2.0.0",
-    description="Post ka URL do — upload time, aur chaho to image match bhi.",
+    description=(
+        "Post ka URL do — **kab upload hua** pata chal jata hai. "
+        "Image bhi do — batata hai **wo image us post me hai ya nahi**, kitne % match."
+        "\n\n"
+        "Platform chunna nahi padta; URL se khud pehchana jata hai: "
+        "X, Instagram, Facebook, LinkedIn, YouTube."
+    ),
+    openapi_tags=TAGS,
     lifespan=lifespan,
 )
 
 # --- step 1 -------------------------------------------------------------
 
-@app.post("/prepare", summary="URL se time + post ki images laao")
+@app.post("/prepare", tags=["Browser flow"],
+          summary="URL se time + post ki images laao")
 async def prepare_post(url: str = Form(...), tz: str | None = Form(None),
                        token: str | None = Form(None),
                        x_access_token: str | None = Header(None)) -> dict:
@@ -82,7 +119,8 @@ async def media(token: str, name: str):
 
 # --- step 2 -------------------------------------------------------------
 
-@app.post("/verify", summary="Image ko post se milao (session ya seedha URL se)")
+@app.post("/verify", tags=["Browser flow"],
+          summary="Image ko post se milao (session ya seedha URL se)")
 async def verify_post(
     url: str | None = Form(None),
     session: str | None = Form(None),
@@ -120,7 +158,8 @@ async def verify_post(
         raise _fail(e) from e
 
 
-@app.delete("/session/{token}", summary="Is session ka saara data abhi mita do")
+@app.delete("/session/{token}", tags=["Browser flow"],
+            summary="Is session ka saara data abhi mita do")
 async def drop_session(token: str) -> dict:
     return {"deleted": store.drop(token)}
 
@@ -130,7 +169,7 @@ app.include_router(api_router)
 
 # --- meta ---------------------------------------------------------------
 
-@app.get("/platforms", tags=["meta"], summary="Kaunse platforms support hain")
+@app.get("/platforms", tags=["Meta"], summary="Kaunse platforms support hain")
 async def platform_list() -> dict:
     live = {p.id for p in reg.enabled()}
     return {
@@ -140,7 +179,7 @@ async def platform_list() -> dict:
     }
 
 
-@app.get("/health", tags=["meta"])
+@app.get("/health", tags=["Meta"], summary="Service zinda hai, aur store me kya pada hai")
 async def health() -> dict:
     store.sweep()
     return {"status": "ok", "platforms": [p.id for p in reg.enabled()],

@@ -25,7 +25,7 @@ from . import fetch, window
 from .http import fail, guard, read_upload
 from .service import Verification, verify
 
-router = APIRouter(prefix="/api/v1", tags=["api"])
+router = APIRouter(prefix="/api/v1", tags=["Integration API"])
 
 
 class TimeRequest(BaseModel):
