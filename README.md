@@ -6,21 +6,25 @@ Ek image bhi do — bata deta hai **wo image us post me hai ya nahi**, aur kitne
 Platform chunna nahi padta; URL se khud pehchan leta hai.
 
 ```bash
-cd postverify
+cd postverify-api                 # sirf API
 pip install -r requirements.txt
-uvicorn app.main:app --reload     # http://localhost:8000
+uvicorn app.main:app --port 8000  # docs: http://localhost:8000/docs
 ```
 
-## Is repo me teen folder hain
+## Is repo me chaar folder hain
 
 | Folder | Kya hai |
 |---|---|
-| **[postverify/](postverify/)** | **Final service — yahi chalani hai.** Time + image match, ek hi jagah. |
-| [posttime/](posttime/) | Pehli service: sirf upload time. Reference ke liye rakhi hai. |
-| [imagematch/](imagematch/) | Doosri service: sirf image match. Reference ke liye rakhi hai. |
+| **[postverify-api/](postverify-api/)** | **Sirf API — integrate karna hai to yahi.** Teen endpoints, koi UI nahi. |
+| [postverify/](postverify/) | Wahi kaam, par web page ke saath — khud check karne ke liye. |
+| [posttime/](posttime/) | Pehli service: sirf upload time. Reference ke liye. |
+| [imagematch/](imagematch/) | Doosri service: sirf image match. Reference ke liye. |
 
 `postverify` pehli do ka merge hai, plus ek ahem sudhaar: ek post pe browser
 **ek hi baar** chalta hai (pehle time aur images ke liye do baar chalta tha).
+
+`postverify-api` usi ka API-only roop hai — na web page, na session, na temp
+files. Post ki images sirf request ki memory me aati hain.
 
 Poori technical detail har folder ke apne README me hai.
 
@@ -38,27 +42,33 @@ Sab kuch **public data** se — koi login, koi API key zaroori nahi.
 
 ## Integration API
 
-```bash
-# upload time + "kitna taaza hai"
-curl -X POST <host>/api/v1/time \
-  -H "content-type: application/json" \
-  -d '{"url":"https://www.instagram.com/p/XXXX/","within":"1d,7d,1m"}'
+[`postverify-api/`](postverify-api/) me teen endpoints hain:
 
-# time + image match
-curl -X POST <host>/api/v1/verify \
+```bash
+# 1. post kab upload hua
+curl -X POST <host>/v1/time \
+  -H "content-type: application/json" \
+  -d '{"url":"https://www.instagram.com/p/XXXX/"}'
+
+# 2. post 1d / 3d / 7d / 15d / 1m ke andar ka hai ya nahi
+curl -X POST <host>/v1/within \
+  -H "content-type: application/json" \
+  -d '{"url":"https://www.instagram.com/p/XXXX/","within":"1d,3d,7d,15d,1m"}'
+
+# 3. ye image us post me hai ya nahi
+curl -X POST <host>/v1/verify \
   -F "url=https://www.instagram.com/p/XXXX/" \
-  -F "image=@meri.jpg" \
-  -F "within=7d"
+  -F "image=@meri.jpg"
 ```
 
 ```json
-{"time": {"published_at": "2026-08-25T17:29:13Z", "age_human": "7 din purana"},
- "within": {"1d": false, "7d": true, "1m": true},
- "image": {"present": true, "verdict": "identical", "score": 100}}
+{"time":   {"published_at": "2026-08-25T17:29:13Z", "age_human": "7 din purana"},
+ "within": {"1d": false, "7d": false, "15d": true, "1m": true},
+ "image":  {"present": true, "verdict": "identical", "score": 100}}
 ```
-Poori API docs: **[postverify/README.md](postverify/README.md#integration-api--apiv1)**
-· interactive docs `<host>/docs`
 
+Poori API docs: **[postverify-api/README.md](postverify-api/README.md)**
+· interactive docs `<host>/docs`
 ---
 
 # Live deploy karna
@@ -112,8 +122,8 @@ Paanchon platforms. Isko chahiye: **1-2 GB RAM**, aur request timeout **60s+**
 ## Cloud Run pe (recommended)
 
 ```bash
-cd postverify
-gcloud run deploy postverify \
+cd postverify-api
+gcloud run deploy postverify-api \
   --source . \
   --region asia-south1 \
   --memory 2Gi \
@@ -199,9 +209,10 @@ pe public service banani ho to unki official API leni chahiye.
 ## Tests
 
 ```bash
-cd postverify && pytest -q     # 167 tests
-cd posttime   && pytest -q     # 106 tests
-cd imagematch && pytest -q     # 67 tests
+cd postverify-api && pytest -q     # 147 tests
+cd postverify     && pytest -q     # 167 tests
+cd posttime       && pytest -q     # 106 tests
+cd imagematch     && pytest -q     # 67 tests
 ```
 
-Har push pe GitHub Actions teeno chala deta hai — `.github/workflows/tests.yml`.
+Har push pe GitHub Actions chaaron chala deta hai — `.github/workflows/tests.yml`.
