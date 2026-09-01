@@ -23,3 +23,4 @@ Thumbs.db
 
 # local tunnel ka token
 .pv_token
+.pv_url
