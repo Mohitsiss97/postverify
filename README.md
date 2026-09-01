@@ -36,6 +36,29 @@ Poori technical detail har folder ke apne README me hai.
 
 Sab kuch **public data** se — koi login, koi API key zaroori nahi.
 
+## Integration API
+
+```bash
+# upload time + "kitna taaza hai"
+curl -X POST <host>/api/v1/time \
+  -H "content-type: application/json" \
+  -d '{"url":"https://www.instagram.com/p/XXXX/","within":"1d,7d,1m"}'
+
+# time + image match
+curl -X POST <host>/api/v1/verify \
+  -F "url=https://www.instagram.com/p/XXXX/" \
+  -F "image=@meri.jpg" \
+  -F "within=7d"
+```
+
+```json
+{"time": {"published_at": "2026-08-25T17:29:13Z", "age_human": "7 din purana"},
+ "within": {"1d": false, "7d": true, "1m": true},
+ "image": {"present": true, "verdict": "identical", "score": 100}}
+```
+Poori API docs: **[postverify/README.md](postverify/README.md#integration-api--apiv1)**
+· interactive docs `<host>/docs`
+
 ---
 
 # Live deploy karna
@@ -176,7 +199,7 @@ pe public service banani ho to unki official API leni chahiye.
 ## Tests
 
 ```bash
-cd postverify && pytest -q     # 99 tests
+cd postverify && pytest -q     # 167 tests
 cd posttime   && pytest -q     # 106 tests
 cd imagematch && pytest -q     # 67 tests
 ```

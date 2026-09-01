@@ -19,17 +19,17 @@ hain — unhe chhua nahi gaya.
 from __future__ import annotations
 
 import os
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from . import fetch
 from . import platforms as reg
-from .compare import ImageError
-from .platforms import PlatformError, UnsupportedURLError
+from .api import router as api_router
+from .http import fail as _fail
+from .http import guard as _guard
+from .http import read_upload as _read
 from .service import Prepared, check, prepare, verify
 from .store import store
 
@@ -49,61 +49,6 @@ app = FastAPI(
     description="Post ka URL do — upload time, aur chaho to image match bhi.",
     lifespan=lifespan,
 )
-
-_STATUS = {
-    "invalid_id": 422,
-    "no_media": 404,
-    "not_visible": 404,
-    "not_configured": 503,
-    "disabled": 503,
-    "upstream_error": 502,
-}
-
-
-def _guard(token: str | None, header: str | None) -> None:
-    """ACCESS_TOKEN set ho to mehenge endpoints sirf usi ke saath chalein.
-
-    Public URL pe ye zaroori hai: har request pe browser chalta hai aur platform
-    ki taraf jaata hai. Bina rok ke koi bhi aapke server se Instagram/Facebook
-    hit kar sakta hai, aur block aapke IP pe aayega — aapke kaam ka nahi.
-
-    Set na ho to service khuli rehti hai (local use ke liye theek).
-    """
-    expected = os.getenv("ACCESS_TOKEN")
-    if not expected:
-        return
-    given = header or token or ""
-    if not secrets.compare_digest(given, expected):
-        raise HTTPException(401, {"error": "unauthorized",
-                                  "message": "Sahi access token chahiye"})
-
-
-def _fail(exc: Exception) -> HTTPException:
-    if isinstance(exc, UnsupportedURLError):
-        return HTTPException(400, {"error": "unsupported_url", "message": str(exc)})
-    if isinstance(exc, ImageError):
-        return HTTPException(400, {"error": "bad_image", "message": str(exc)})
-    if isinstance(exc, fetch.TooLargeError):
-        return HTTPException(413, {"error": "too_large", "message": str(exc)})
-    if isinstance(exc, PlatformError):
-        return HTTPException(_STATUS.get(exc.reason, 500), {
-            "error": exc.reason, "platform": exc.platform, "message": str(exc)})
-    raise exc
-
-
-async def _read(image: UploadFile | None) -> bytes | None:
-    """Upload sirf memory me — disk pe kabhi nahi jaati."""
-    if image is None or not image.filename:
-        return None
-    data = await image.read()
-    if not data:
-        return None
-    if len(data) > fetch.MAX_IMAGE_BYTES:
-        raise fetch.TooLargeError(
-            f"Image bahut badi hai ({len(data) // 1024 // 1024} MB). "
-            f"Limit {fetch.MAX_IMAGE_BYTES // 1024 // 1024} MB hai.")
-    return data
-
 
 # --- step 1 -------------------------------------------------------------
 
@@ -178,6 +123,9 @@ async def verify_post(
 @app.delete("/session/{token}", summary="Is session ka saara data abhi mita do")
 async def drop_session(token: str) -> dict:
     return {"deleted": store.drop(token)}
+
+
+app.include_router(api_router)
 
 
 # --- meta ---------------------------------------------------------------

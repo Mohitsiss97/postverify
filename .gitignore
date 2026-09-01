@@ -20,3 +20,6 @@ htmlcov/
 Thumbs.db
 .idea/
 .vscode/
+
+# local tunnel ka token
+.pv_token

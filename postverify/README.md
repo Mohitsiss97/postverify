@@ -14,7 +14,7 @@ padhkar naye sire se joda gaya hai.
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload      # http://localhost:8000
-pytest -q                          # 94 tests
+pytest -q                          # 167 tests
 ```
 
 Docker: `docker build -t postverify . && docker run -p 8000:8000 postverify`
@@ -54,6 +54,159 @@ curl -X POST localhost:8000/verify \
 ```
 
 Baaki: `GET /` (UI) · `POST /prepare` · `GET /media/...` · `DELETE /session/...` · `GET /platforms` · `GET /health`
+
+Integration ke liye alag, saaf API hai — **[`/api/v1`](#integration-api--apiv1)**.
+
+## Integration API — `/api/v1`
+
+UI waale endpoints browser ke liye bane hain (session, `/media`, do kadam).
+Integration ke liye ye alag, saaf API hai: **ek call, ek JSON jawab**.
+
+### `POST /api/v1/time` — sirf upload time
+
+```bash
+curl -X POST localhost:8000/api/v1/time   -H "content-type: application/json"   -d '{"url":"https://x.com/elonmusk/status/1026872652290379776",
+       "tz":"Asia/Kolkata",
+       "within":"1d,7d,1m,20y"}'
+```
+
+```json
+{
+  "ok": true,
+  "platform": "x",
+  "post_id": "1026872652290379776",
+  "canonical_url": "https://x.com/elonmusk/status/1026872652290379776",
+  "time": {
+    "published_at": "2018-08-07T16:48:13.334000Z",
+    "published_at_local": "2018-08-07T22:18:13.334000+05:30",
+    "timezone": "Asia/Kolkata",
+    "age_seconds": 255074000,
+    "age_human": "8 saal purana",
+    "method": "id-embedded",
+    "precision": "millisecond"
+  },
+  "within": {"1d": false, "7d": false, "1m": false, "20y": true},
+  "checked_at": "2026-09-01T07:45:11Z"
+}
+```
+
+Testing ke liye `GET` bhi hai:
+
+```bash
+curl "localhost:8000/api/v1/time?url=https://youtu.be/jNQXAC9IVRw&within=7d"
+```
+
+### `POST /api/v1/verify` — time + image match
+
+```bash
+curl -X POST localhost:8000/api/v1/verify   -F "url=https://www.instagram.com/p/DceLPdrCR3L/"   -F "image=@meri-image.jpg"   -F "within=1d,7d,1m"
+
+# file ki jagah image ka URL bhi de sakte ho (server-to-server ke liye aasan)
+curl -X POST localhost:8000/api/v1/verify   -F "url=https://www.instagram.com/p/DceLPdrCR3L/"   -F "image_url=https://example.com/meri-image.jpg"
+```
+
+```json
+{
+  "ok": true,
+  "platform": "instagram",
+  "time": {"published_at": "2026-08-25T17:29:13Z", "age_human": "7 din purana"},
+  "within": {"1d": false, "7d": true, "1m": true},
+  "image": {
+    "checked": true,
+    "present": true,
+    "verdict": "identical",
+    "score": 100,
+    "images_checked": 1,
+    "matched": {"tier": "post", "score": 100, "orb_inliers": 0, "phash_distance": 0}
+  }
+}
+```
+
+### `within` — "ye post kitna taaza hai"
+
+Comma se alag karke jitni chahiye utni windows do; har ek ka seedha true/false milta hai.
+
+| Unit | Matlab |
+|---|---|
+| `s`, `sec` | second |
+| `min` | minute |
+| `h`, `hr` | ghanta |
+| `d`, `day` | din — unit na likho to yahi maana jaata hai (`7` = `7d`) |
+| `w`, `week` | hafta |
+| `m`, `mo`, `month` | **month = 30 din** |
+| `y`, `year` | saal = 365 din |
+
+**Dhyan dijiye: yahan `m` ka matlab month hai, minute nahi.** Bahut parsers me
+`m` = minute hota hai; ye jaan-boojh kar alag rakha hai kyunki sawaal hi
+"1 month" waala tha. Minute chahiye to `min` likhiye.
+
+Ek hi window do to seedha boolean bhi mil jaata hai:
+
+```json
+{"within": {"7d": true}, "is_within": true}
+```
+
+Aur `within_detail` me har window ka `seconds` aur `cutoff` timestamp aata hai,
+taaki aap khud hisaab verify kar sakein.
+
+Do baatein jo galat jawab se bachati hain:
+
+- **Window pehle parse hoti hai, kaam baad me.** `within` galat ho to `400 bad_window`
+  turant milta hai — 15 second ka browser render shuru hi nahi hota.
+- **Time na mile to window ka jawab nahi milta.** `within: null` aur `within_error`
+  aata hai; `false` bhej dena jhooth hota.
+
+### Response ke kuch fields
+
+| Field | Matlab |
+|---|---|
+| `time.method` | `id-embedded` (offline), `public-page`, `headless-page`, `api` |
+| `time.precision` | `millisecond` (X, LinkedIn) ya `second` |
+| `image.verdict` | `identical` / `same` / `likely` / `different` |
+| `image.score` | 0-100. Asli match 74+, alag image 25 se neeche |
+| `image.present` | `verdict` ke teen achhe results pe `true` |
+| `image.matched.tier` | `post` = pakka isi post ki image; `page` = post page pe mili (carousel slide ya related post ho sakti hai) |
+
+**Faisla `verdict` se lijiye, `score` se nahi.** Score dikhane ke liye hai;
+verdict calibrated thresholds pe chalta hai.
+
+### Errors
+
+Sab errors ek hi shape me: `{"detail": {"error": "...", "message": "..."}}`
+
+| HTTP | error |
+|---|---|
+| 400 | `unsupported_url`, `bad_image`, `bad_window` |
+| 401 | `unauthorized` (ACCESS_TOKEN set ho aur token galat/na ho) |
+| 404 | `no_media`, `not_visible` |
+| 413 | `too_large` |
+| 422 | `invalid_id` |
+| 502 | `upstream_error` |
+| 503 | `not_configured`, `disabled` |
+
+### Token
+
+`ACCESS_TOKEN` set ho to teeno tareeke chalte hain:
+
+```bash
+-H "X-Access-Token: aapka-token"     # header (recommended)
+-d '{"...", "token": "aapka-token"}'  # JSON body
+?token=aapka-token                    # query (sirf GET pe)
+```
+
+### Kitna time lagta hai
+
+| Platform | `/time` | `/verify` |
+|---|---|---|
+| X, LinkedIn | ~0s — offline, koi network call nahi | ~3-8s |
+| YouTube | ~3s | ~6s |
+| Instagram | ~13s | ~15s |
+| Facebook | ~6-12s | ~12s |
+
+`/time` pe images download hoti hi nahi. Instagram/Facebook pe browser chalta hai,
+isliye client ka timeout kam se kam **60 second** rakhiye.
+
+Interactive docs: `/docs`
 
 ## Do kadam: prepare, phir check
 
@@ -269,6 +422,9 @@ app/browser.py            headless Chrome (concurrency capped)
 app/service.py            prepare() aur check() — dono kadam
 app/store.py              temp session store + cleanup
 app/main.py               /prepare, /media, /verify, /session + meta
+app/api.py                /api/v1 — integration API
+app/window.py             "1d, 7d, 1m" jaisi windows parse aur check
+app/http.py               saanjhe HTTP tukde (guard, error mapping, upload)
 app/web/index.html        UI (URL + optional image, koi picker nahi)
 ```
 
