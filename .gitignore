@@ -24,3 +24,7 @@ Thumbs.db
 # local tunnel ka token
 .pv_token
 .pv_url
+
+# campaign-portal ke local artifacts
+campaign-portal/campaign_portal.db*
+campaign-portal/storage/

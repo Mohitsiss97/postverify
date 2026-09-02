@@ -11,14 +11,19 @@ pip install -r requirements.txt
 uvicorn app.main:app --port 8000  # docs: http://localhost:8000/docs
 ```
 
-## Is repo me chaar folder hain
+## Is repo me paanch folder hain
 
 | Folder | Kya hai |
 |---|---|
-| **[postverify-api/](postverify-api/)** | **Sirf API — integrate karna hai to yahi.** Teen endpoints, koi UI nahi. |
-| [postverify/](postverify/) | Wahi kaam, par web page ke saath — khud check karne ke liye. |
+| **[campaign-portal/](campaign-portal/)** | **Poora product.** Campaign, creatives, user submissions, aur "sahi image + 24 ghante ke andar" ka faisla. |
+| **[postverify-api/](postverify-api/)** | **Verification engine.** Teen endpoints — portal isi ko call karta hai. |
+| [postverify/](postverify/) | Wahi engine, par web page ke saath — khud check karne ke liye. |
 | [posttime/](posttime/) | Pehli service: sirf upload time. Reference ke liye. |
 | [imagematch/](imagematch/) | Doosri service: sirf image match. Reference ke liye. |
+
+Portal aur engine **alag services** hain, HTTP se jude hue. Wajah: engine browser
+chalata hai (bhaari, CPU-bound), portal sirf HTTP aur DB (halka) — dono ko alag
+scale karna chahiye.
 
 `postverify` pehli do ka merge hai, plus ek ahem sudhaar: ek post pe browser
 **ek hi baar** chalta hai (pehle time aur images ke liye do baar chalta tha).
@@ -69,6 +74,14 @@ curl -X POST <host>/v1/verify \
 
 Poori API docs: **[postverify-api/README.md](postverify-api/README.md)**
 · interactive docs `<host>/docs`
+
+## Poora product
+
+Sirf verification chahiye to upar wali API kaafi hai. Par agar aapko wo **campaign
+flow** chahiye jisme users creative download karke apne account pe post karte hain
+aur portal unhe verify karta hai — wo [campaign-portal/](campaign-portal/) me hai:
+campaigns, creatives, enrollments, submissions, background verification, duplicate
+detection, aur poora audit trail.
 ---
 
 # Live deploy karna
@@ -209,10 +222,11 @@ pe public service banani ho to unki official API leni chahiye.
 ## Tests
 
 ```bash
-cd postverify-api && pytest -q     # 147 tests
-cd postverify     && pytest -q     # 167 tests
-cd posttime       && pytest -q     # 106 tests
-cd imagematch     && pytest -q     # 67 tests
+cd campaign-portal && pytest -q    # 58 tests
+cd postverify-api  && pytest -q    # 147 tests
+cd postverify      && pytest -q    # 167 tests
+cd posttime        && pytest -q    # 106 tests
+cd imagematch      && pytest -q    # 67 tests
 ```
 
-Har push pe GitHub Actions chaaron chala deta hai — `.github/workflows/tests.yml`.
+Har push pe GitHub Actions paanchon chala deta hai — `.github/workflows/tests.yml`.

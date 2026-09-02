@@ -1,0 +1,54 @@
+# Poora stack: portal + verification engine + Postgres.
+#
+# Engine alag service isliye hai ki uska kaam bilkul alag hai — wo browser
+# chalata hai (bhaari, CPU-bound), portal sirf HTTP aur DB (halka). Dono ko
+# alag-alag scale karna chahiye.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: portal
+      POSTGRES_PASSWORD: portal
+      POSTGRES_DB: campaign_portal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portal"]
+      interval: 5s
+      retries: 10
+
+  engine:
+    build: ../postverify-api
+    environment:
+      ACCESS_TOKEN: ${ENGINE_TOKEN:-}
+      HEADLESS_MAX_CONCURRENT: "2"
+    # Chrome ko shared memory chahiye — bina iske wo bade pages pe crash karta
+    shm_size: "1gb"
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  portal:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      engine:
+        condition: service_started
+    environment:
+      ENV: production
+      LOG_JSON: "true"
+      DATABASE_URL: postgresql+asyncpg://portal:portal@db:5432/campaign_portal
+      ENGINE_URL: http://engine:8000
+      ENGINE_TOKEN: ${ENGINE_TOKEN:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN set kijiye}
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/srv/storage
+
+volumes:
+  pgdata:
+  storage:

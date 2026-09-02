@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [postverify-api, postverify, posttime, imagematch]
+        service: [campaign-portal, postverify-api, postverify, posttime, imagematch]
 
     steps:
       - uses: actions/checkout@v4
