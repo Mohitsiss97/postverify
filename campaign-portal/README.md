@@ -24,7 +24,7 @@ pip install -r requirements.txt
 cp .env.example .env
 alembic upgrade head
 uvicorn app.main:app --port 8000      # UI: /   ·   API docs: /docs
-pytest -q                              # 59 tests
+pytest -q                              # 63 tests
 ```
 
 ## Web UI
@@ -160,6 +160,23 @@ campaign ke creatives ek-ek karke try hote hain (`MAX_ASSETS_TO_TRY` tak).
 
 Har reason ka ek saaf Hindi message hai (`app/enums.py`) — sab ek hi jagah, taaki
 API, DB aur user ko dikhne wala text kabhi alag na ho jaayein.
+
+### Errors ka shape
+
+Har error — chahe humara apna ho, Pydantic ka validation ho, ya FastAPI ka apna
+404 — **ek hi shape** me aata hai:
+
+```json
+{"error": "already_pending",
+ "message": "Aapka ek submission abhi check ho raha hai..."}
+```
+
+FastAPI apne aap `HTTPException` ko `{"detail": ...}` me lapet deta hai, jisse do
+alag shapes ban jaate the — validation flat, baaki nested. Client ko do tarah ka
+parsing likhna padta. Ek exception handler wo lapet khol deta hai.
+
+Kuch errors extra fields bhi dete hain (`submission_id`, `asset_id`,
+validation ka `fields`) — wo saath hi aate hain.
 
 ---
 
@@ -312,7 +329,7 @@ migrations/           Alembic
 ## Tests
 
 ```bash
-pytest -q     # 59 tests
+pytest -q     # 63 tests
 ```
 
 Koi test asli engine ko call nahi karta — sab `FakeEngine` se chalte hain

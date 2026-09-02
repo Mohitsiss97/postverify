@@ -264,9 +264,10 @@ async function api(path, {method = "GET", body, form, admin = false} = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
 
   if (!r.ok) {
-    // Do shapes aa sakte hain: HTTPException {detail:{...}} aur validation {error,...}
-    const d = (data && data.detail) || data || {};
-    throw new Error(d.message || d.error || `HTTP ${r.status}`);
+    // Har error ek hi shape me aata hai: {"error", "message"}
+    const err = new Error((data && data.message) || `HTTP ${r.status}`);
+    err.code = data && data.error;
+    throw err;
   }
   return data;
 }

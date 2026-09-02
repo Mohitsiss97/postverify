@@ -44,7 +44,7 @@ def test_cannot_activate_a_campaign_with_no_creatives(client):
     c = client.post("/v1/campaigns", json={"title": "Khaali Campaign"}).json()
     r = client.patch(f"/v1/campaigns/{c['id']}", json={"status": "active"})
     assert r.status_code == 409
-    assert r.json()["detail"]["error"] == "no_assets"
+    assert r.json()["error"] == "no_assets"
 
 
 def test_upload_and_download_a_creative(client):
@@ -66,7 +66,7 @@ def test_same_creative_twice_is_refused(client):
     again = client.post(f"/v1/campaigns/{c['id']}/assets",
                         files={"file": ("copy.png", PNG_1PX, "image/png")})
     assert again.status_code == 409
-    assert again.json()["detail"]["error"] == "duplicate_asset"
+    assert again.json()["error"] == "duplicate_asset"
 
 
 def test_only_images_allowed(client):
@@ -89,7 +89,7 @@ def test_enroll_needs_a_user(client):
     campaign = make_campaign(client)
     r = client.post(f"/v1/campaigns/{campaign['id']}/enroll")     # bina header
     assert r.status_code == 401
-    assert r.json()["detail"]["error"] == "no_user"
+    assert r.json()["error"] == "no_user"
 
 
 def test_cannot_enroll_in_a_draft_campaign(client):
@@ -148,7 +148,7 @@ def test_only_one_submission_in_flight(client):
     assert submit(client, e["id"]).status_code == 202
     second = submit(client, e["id"])
     assert second.status_code == 409
-    assert second.json()["detail"]["error"] == "already_pending"
+    assert second.json()["error"] == "already_pending"
 
 
 def test_asset_from_another_campaign_is_refused(client):
@@ -272,3 +272,49 @@ def test_user_endpoints_stay_open_when_admin_is_locked(client, monkeypatch):
     r = client.post(f"/v1/campaigns/{campaign['id']}/enroll",
                     headers={"X-User-Id": USER})
     assert r.status_code == 201
+
+
+# ---------------- errors ek hi shape me ----------------
+
+def test_all_errors_have_the_same_shape(client):
+    """Client ko ek hi tarah ka parsing likhna pade — {"error", "message"}.
+
+    Yahan teen alag raaste jaan-boojh kar liye hain: humara apna HTTPException,
+    Pydantic ka validation error, aur FastAPI ka apna 404.
+    """
+    cases = [
+        client.post("/v1/campaigns/9999/enroll", headers={"X-User-Id": "ravi"}),  # hamara
+        client.post("/v1/campaigns", json={"title": "x"}),                        # validation
+        client.get("/v1/aisa-koi-route-nahi"),                                    # framework
+    ]
+    for r in cases:
+        body = r.json()
+        assert r.status_code >= 400
+        assert "detail" not in body, f"{r.url} abhi bhi detail me lapeta hua hai"
+        assert isinstance(body.get("error"), str) and body["error"]
+        assert isinstance(body.get("message"), str) and body["message"]
+
+
+def test_framework_404_gets_a_readable_code(client):
+    r = client.get("/v1/kuch-bhi")
+    assert r.status_code == 404
+    assert r.json()["error"] == "not_found"
+
+
+def test_our_own_codes_survive(client):
+    """Humare apne error codes badalne nahi chahiye — sirf lapet hat'ni thi."""
+    campaign = make_campaign(client)
+    e = enroll(client, campaign["id"])
+    submit(client, e["id"])
+    r = submit(client, e["id"])
+    assert r.status_code == 409
+    assert r.json()["error"] == "already_pending"
+    assert r.json()["submission_id"], "extra fields bhi bache rehne chahiye"
+
+
+def test_validation_error_still_lists_fields(client):
+    r = client.post("/v1/campaigns", json={"title": "x", "window_hours": 0})
+    assert r.status_code == 422
+    body = r.json()
+    assert body["error"] == "invalid_request"
+    assert isinstance(body["fields"], list) and body["fields"]

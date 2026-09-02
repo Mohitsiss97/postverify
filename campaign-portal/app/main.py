@@ -25,6 +25,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import worker as worker_module
 from .config import settings
@@ -96,6 +97,45 @@ app.include_router(admin.router)
 
 
 # --- errors ek hi shape me ---------------------------------------------
+#
+# Poore portal me har error aisa dikhta hai:
+#     {"error": "<code>", "message": "<insaan ke padhne layak>"}
+#
+# FastAPI apne aap HTTPException ko {"detail": ...} me lapet deta hai, jisse do
+# alag shapes ban jaate the — validation errors flat, baaki nested. Client ko
+# do tarah ka parsing likhna padta. Ye handler use kholkar ek hi shape me laata hai.
+
+# Framework ke apne errors (404, 405, ...) ka code aur message. Inhe bhi Hindi
+# me rakha hai — user ko aadha Hindi aadha English dikhna kharab lagta hai.
+_FALLBACK = {
+    400: ("bad_request", "Request theek nahi hai"),
+    401: ("unauthorized", "Iske liye pehchan chahiye"),
+    403: ("forbidden", "Iski ijaazat nahi hai"),
+    404: ("not_found", "Ye cheez nahi mili"),
+    405: ("method_not_allowed", "Is route pe ye tareeka nahi chalta"),
+    409: ("conflict", "Ye abhi nahi ho sakta"),
+    413: ("too_large", "Bheji hui cheez bahut badi hai"),
+    415: ("unsupported_media_type", "Is type ki file nahi chalti"),
+    429: ("rate_limited", "Bahut zyada requests — thodi der baad koshish kijiye"),
+    500: ("server_error", "Server pe kuch gadbad ho gayi"),
+    503: ("unavailable", "Service abhi uplabdh nahi hai"),
+}
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+    detail = exc.detail
+    if isinstance(detail, dict) and "error" in detail:
+        content = dict(detail)                      # humne khud banaya hua
+    else:
+        # FastAPI/Starlette ke apne errors (404 "Not Found", 405, ...)
+        code, message = _FALLBACK.get(exc.status_code,
+                                      ("http_error", "Request poori nahi ho payi"))
+        content = {"error": code, "message": message}
+    return JSONResponse(status_code=exc.status_code, content=content,
+                        headers=getattr(exc, "headers", None))
+
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:

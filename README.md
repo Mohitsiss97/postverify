@@ -222,7 +222,7 @@ pe public service banani ho to unki official API leni chahiye.
 ## Tests
 
 ```bash
-cd campaign-portal && pytest -q    # 59 tests
+cd campaign-portal && pytest -q    # 63 tests
 cd postverify-api  && pytest -q    # 147 tests
 cd postverify      && pytest -q    # 167 tests
 cd posttime        && pytest -q    # 106 tests
