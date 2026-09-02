@@ -147,16 +147,45 @@
   tbody tr.clickable:hover{background:var(--panel-2)}
   td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 
+  /* ---------- steps ---------- */
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;display:grid;grid-template-columns:30px minmax(0,1fr);gap:14px}
+  .step+.step{margin-top:12px}
+  .step .n{width:26px;height:26px;border-radius:50%;background:var(--accent-soft);
+    color:var(--accent);border:1px solid var(--accent-line);display:grid;
+    place-items:center;font-size:12.5px;font-weight:700}
+  .step.done .n{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+  .step h4{margin:2px 0 4px;font-size:15px;letter-spacing:-.01em}
+  .step .hint{margin:0 0 12px;font-size:13px;color:var(--muted);max-width:62ch}
+
+  .howto{margin-top:12px;border-top:1px solid var(--line-soft);padding-top:11px}
+  .howto summary{cursor:pointer;font-size:12.5px;color:var(--accent);
+    list-style:none;display:inline-flex;align-items:center;gap:5px}
+  .howto summary::-webkit-details-marker{display:none}
+  .howto summary::before{content:"?";width:15px;height:15px;border-radius:50%;
+    background:var(--accent-soft);border:1px solid var(--accent-line);
+    display:grid;place-items:center;font-size:10px;font-weight:700}
+  .howto ol{margin:9px 0 0;padding-left:20px;font-size:13px;color:var(--muted)}
+  .howto li+li{margin-top:3px}
+
   /* ---------- creative ---------- */
   .shot{border:1px solid var(--line);border-radius:9px;overflow:hidden;
     background:var(--bg)}
-  .shot img{display:block;width:100%;height:150px;object-fit:cover}
+  .shot img{display:block;width:100%;height:180px;object-fit:cover;background:var(--panel-2)}
   .shot .meta{padding:8px 10px;font-size:12px;color:var(--muted);
     display:flex;justify-content:space-between;gap:8px;align-items:center}
   .pick{position:relative;cursor:pointer}
   .pick input{position:absolute;opacity:0;pointer-events:none}
   .pick.sel{outline:2px solid var(--accent);outline-offset:1px}
   .pick.sel .meta{background:var(--accent-soft);color:var(--accent)}
+  .pick .tick{position:absolute;top:8px;right:8px;width:22px;height:22px;
+    border-radius:50%;background:var(--accent);color:#fff;display:none;
+    place-items:center;font-size:12px;font-weight:700}
+  .pick.sel .tick{display:grid}
+  .dl{display:inline-flex;align-items:center;gap:7px;margin-top:12px;
+    background:var(--accent);color:#fff;border:0;border-radius:8px;
+    padding:9px 15px;font-size:14px;font-weight:500;text-decoration:none}
+  .dl:hover{filter:brightness(1.06)}
 
   /* ---------- result ---------- */
   .verdict{display:flex;gap:14px;align-items:flex-start}
@@ -394,48 +423,76 @@ VIEWS.campaign = async (main, id) => {
   const subs = await api(`/v1/submissions?campaign_id=${id}`);
   const live = subs.find(s => s.status === "pending" || s.status === "verifying");
 
+  const many = campaign.assets.length > 1;
+
   main.innerHTML = `
     <button class="link" data-back>&larr; sab campaigns</button>
     <h1 style="margin-top:10px">${esc(campaign.title)}</h1>
-    <p class="sub">Post <b>${campaign.window_hours} ghante</b> ke andar ki honi chahiye,
-      aur usme neeche waali image honi chahiye.</p>
+    <p class="sub">Teen kadam: image download kijiye, apne account pe post kijiye,
+      phir us post ka link yahan daaliye.</p>
 
-    <div class="card">
-      <label class="f">1 &middot; Image download kijiye</label>
-      <p class="small muted" style="margin:0 0 12px">Jise post karna hai use chuniye —
-        submit karte waqt wahi bhej denge, isse check tez hota hai.</p>
-      <div class="grid g3" id="assets">
-        ${campaign.assets.map((a, i) => `
-          <label class="shot pick ${i === 0 ? "sel" : ""}" data-asset="${a.id}">
-            <input type="radio" name="asset" value="${a.id}" ${i === 0 ? "checked" : ""}>
-            <img src="/v1/campaigns/${campaign.id}/assets/${a.id}/file" alt="">
-            <span class="meta"><span>${esc(a.filename)}</span>
-              <a href="/v1/campaigns/${campaign.id}/assets/${a.id}/file"
-                 download onclick="event.stopPropagation()">download</a></span>
-          </label>`).join("")}
+    <div class="step">
+      <div class="n">1</div>
+      <div>
+        <h4>Image download kijiye</h4>
+        <p class="hint">${many
+          ? "Jo image post karni hai use chuniye, phir download kijiye."
+          : "Yahi image aapko post karni hai."}</p>
+        <div class="grid g3" id="assets">
+          ${campaign.assets.map((a, i) => `
+            <div class="shot pick ${i === 0 ? "sel" : ""}" data-asset="${a.id}"
+                 data-name="${esc(a.filename)}">
+              <span class="tick">&#10003;</span>
+              <img src="/v1/campaigns/${campaign.id}/assets/${a.id}/file" alt="">
+              <span class="meta"><span>${esc(a.filename)}</span>
+                <span class="faint">${Math.round(a.size_bytes / 1024)} KB</span></span>
+            </div>`).join("")}
+        </div>
+        <a class="dl" id="dl" href="#" download>&#8595;&nbsp; Image download karo</a>
       </div>
     </div>
 
-    <div class="card">
-      <label class="f">2 &middot; Post karke uska link daaliye</label>
-      ${live ? `<p class="small muted" style="margin:0 0 12px">
-        Aapka ek submission abhi check ho raha hai — uska nateeja aane ke baad naya bhej sakte hain.</p>` : ""}
-      <div class="field">
-        <input id="url" type="url" placeholder="https://www.instagram.com/p/XXXXXXXX/"
-               ${live ? "disabled" : ""}>
+    <div class="step">
+      <div class="n">2</div>
+      <div>
+        <h4>Apne account pe post kijiye</h4>
+        <p class="hint">Downloaded image ko apne social account pe post kijiye.
+          Do baatein zaroori hain — <b>post public honi chahiye</b> (private post
+          hum khol hi nahi payenge), aur wo <b>${campaign.window_hours} ghante</b>
+          ke andar ki honi chahiye.</p>
       </div>
-      <div class="field">
-        <label class="f" for="plat">Kis platform pe post kiya</label>
-        <select id="plat" ${live ? "disabled" : ""}>
-          <option value="instagram">Instagram</option>
-          <option value="facebook">Facebook</option>
-          <option value="x">X (Twitter)</option>
-          <option value="linkedin">LinkedIn</option>
-          <option value="youtube">YouTube</option>
-        </select>
+    </div>
+
+    <div class="step">
+      <div class="n">3</div>
+      <div>
+        <h4>Us post ka link yahan daaliye</h4>
+        <p class="hint">${live
+          ? "Aapka ek submission abhi check ho raha hai — uska nateeja aane ke baad naya bhej sakte hain."
+          : "Post ka poora URL chahiye, profile ka nahi."}</p>
+        <div class="field">
+          <label class="f" for="plat">Kis platform pe post kiya</label>
+          <select id="plat" ${live ? "disabled" : ""}>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="x">X (Twitter)</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="youtube">YouTube</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="f" for="url">Post ka link</label>
+          <input id="url" type="url" placeholder="https://www.instagram.com/p/XXXXXXXX/"
+                 ${live ? "disabled" : ""}>
+        </div>
+        <button class="btn" id="send" style="margin-top:14px" ${live ? "disabled" : ""}>
+          Submit karo</button>
+
+        <details class="howto">
+          <summary>Post ka link kaise nikalein?</summary>
+          <ol id="howsteps"></ol>
+        </details>
       </div>
-      <button class="btn" id="send" style="margin-top:15px" ${live ? "disabled" : ""}>
-        Submit karo</button>
     </div>
 
     <div id="live"></div>
@@ -444,10 +501,50 @@ VIEWS.campaign = async (main, id) => {
       IS CAMPAIGN KI MERI SUBMISSIONS</h3>
       ${submissionTable(subs)}` : ""}`;
 
+  // link kaise nikalein — platform ke hisaab se badalta hai
+  const HOWTO = {
+    instagram: ["Apni post kholiye", "Upar daayin taraf ke tteen dot dabaiye",
+                "&ldquo;Link&rdquo; ya &ldquo;Copy link&rdquo; chuniye"],
+    facebook: ["Apni post kholiye", "Post ke upar teen dot dabaiye",
+               "&ldquo;Copy link&rdquo; chuniye"],
+    x: ["Apni post kholiye", "Neeche share ka icon dabaiye",
+        "&ldquo;Copy link&rdquo; chuniye"],
+    linkedin: ["Apni post kholiye", "Upar daayin taraf teen dot dabaiye",
+               "&ldquo;Copy link to post&rdquo; chuniye"],
+    youtube: ["Apna video kholiye", "&ldquo;Share&rdquo; dabaiye",
+              "Link copy kar lijiye"],
+  };
+  const PLACEHOLDER = {
+    instagram: "https://www.instagram.com/p/XXXXXXXX/",
+    facebook: "https://www.facebook.com/<page>/posts/1234567890",
+    x: "https://x.com/<user>/status/1234567890",
+    linkedin: "https://www.linkedin.com/feed/update/urn:li:activity:1234567890/",
+    youtube: "https://youtu.be/XXXXXXXXXXX",
+  };
+  const syncPlatform = () => {
+    const p = main.querySelector("#plat").value;
+    main.querySelector("#howsteps").innerHTML =
+      HOWTO[p].map(x => `<li>${x}</li>`).join("");
+    main.querySelector("#url").placeholder = PLACEHOLDER[p];
+  };
+  main.querySelector("#plat").addEventListener("change", syncPlatform);
+  syncPlatform();
+
+  // download button hamesha chune hue creative ka
+  const syncDownload = () => {
+    const sel = main.querySelector(".pick.sel");
+    const dl = main.querySelector("#dl");
+    if (!sel) { dl.style.display = "none"; return; }
+    dl.href = `/v1/campaigns/${campaign.id}/assets/${sel.dataset.asset}/file`;
+    dl.setAttribute("download", sel.dataset.name);
+  };
+  syncDownload();
+
   main.querySelector("[data-back]").addEventListener("click", () => go("campaigns"));
   main.querySelectorAll(".pick").forEach(p => p.addEventListener("click", () => {
     main.querySelectorAll(".pick").forEach(x => x.classList.remove("sel"));
     p.classList.add("sel");
+    syncDownload();
   }));
 
   if (live) watch(live.id, main.querySelector("#live"));
