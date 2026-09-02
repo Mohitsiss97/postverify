@@ -1,3 +1,6 @@
+# Runtime dependencies only. Test tooling lives in requirements-dev.txt so that
+# production images do not ship a test runner.
+
 fastapi>=0.110
 uvicorn[standard]>=0.27
 pydantic>=2.6
@@ -5,15 +8,13 @@ pydantic-settings>=2.2
 python-multipart>=0.0.9
 httpx>=0.26
 
-# DB — async, kyunki app async hai aur sync driver event loop rok deta
+# The database layer is async because the application is; a synchronous driver
+# would block the event loop for the whole of each engine call.
 sqlalchemy[asyncio]>=2.0
-aiosqlite>=0.20            # dev
-asyncpg>=0.29              # prod (Postgres)
+aiosqlite>=0.20            # development and tests
+asyncpg>=0.29              # production (PostgreSQL)
 alembic>=1.13
 greenlet>=3.0
 
-pillow>=10.2               # evidence thumbnails
-
-pytest>=8.0
-pytest-asyncio>=0.23
+# Windows has no system timezone database, so ZoneInfo fails there without it.
 tzdata>=2024.1; sys_platform == "win32"

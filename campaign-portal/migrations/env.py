@@ -1,7 +1,7 @@
 """Alembic environment.
 
-DB URL app ke settings se aata hai, alembic.ini se nahi — taaki dev aur
-production dono jagah wahi ek source of truth rahe.
+The database URL comes from the application settings rather than from
+alembic.ini, so development and production share one source of truth.
 """
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app import models  # noqa: F401  — the import is what registers the tables
 from app.config import settings
 from app.db import Base, UtcDateTime
-from app import models  # noqa: F401  — tables register hone chahiye
 
 config = context.config
 if config.config_file_name:
@@ -38,11 +38,12 @@ def run_migrations_offline() -> None:
 
 
 def render_item(type_, obj, autogen_context):
-    """UtcDateTime ko migration me plain timestamp likho.
+    """Render UtcDateTime as a plain timestamp in migrations.
 
-    Wo Python-side TypeDecorator hai; database me wo bas TIMESTAMP WITH TIME
-    ZONE hai. Migration me app ka class likhne se do dikkatein hoti: migration
-    file app code pe depend kar jaati, aur import bhi khud nahi aata.
+    It is a Python-side TypeDecorator; in the database it is simply TIMESTAMP
+    WITH TIME ZONE. Writing the application class into a migration would cause
+    two problems: the migration file would depend on application code, and the
+    import it needs is not emitted automatically.
     """
     if type_ == "type" and isinstance(obj, UtcDateTime):
         return "sa.DateTime(timezone=True)"
@@ -55,8 +56,8 @@ def do_run(connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         render_item=render_item,
-        # SQLite ALTER TABLE bahut seemit hai; batch mode usse table dobara
-        # bana kar kaam chala leta hai.
+        # SQLite's ALTER TABLE is very limited; batch mode works around it by
+        # rebuilding the table.
         render_as_batch=settings.database_url.startswith("sqlite"),
     )
     with context.begin_transaction():

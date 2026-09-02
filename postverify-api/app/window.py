@@ -1,14 +1,16 @@
-"""Time windows: "ye post 7 din ke andar ka hai kya?"
+"""Time windows: "was this post published within the last 7 days?"
 
-Integration ke liye sabse kaam ki cheez yahi hai — timestamp to mil jaata hai, par
-aksar sawaal ye hota hai ki post kitna taaza hai. Isliye `within` parameter ek ya
-kai windows leta hai aur har ek ka seedha true/false deta hai:
+For integrators this is usually the question that matters. The timestamp is
+easy enough to obtain, but the decision almost always depends on how recent the
+post is, so the `within` parameter accepts one or more windows and answers each
+one directly:
 
     within=1d,3d,7d,1m  ->  {"1d": false, "3d": false, "7d": true, "1m": true}
 
-Ek dhyan dene layak baat: yahan **m ka matlab month hai, minute nahi**. Bahut
-parsers me m = minute hota hai, isliye ye jaan-boojh kar alag hai — sawaal hi
-"1 month" waala tha. Minute chahiye to `min` likhiye.
+One deliberate departure from convention: **`m` means month here, not minute.**
+Many parsers read `m` as minute, but the requirement this was built for was
+"1 month", and silently answering a different question is worse than being
+unconventional. Use `min` for minutes.
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-# Kitne seconds ka ek unit
+# Seconds per unit.
 _UNITS = {
     "s": 1,
     "sec": 1,
@@ -28,10 +30,10 @@ _UNITS = {
     "day": 86_400,
     "w": 604_800,
     "week": 604_800,
-    "m": 2_592_000,        # 30 din — calendar month nahi
+    "m": 2_592_000,        # 30 days — not a calendar month
     "mo": 2_592_000,
     "month": 2_592_000,
-    "y": 31_536_000,       # 365 din
+    "y": 31_536_000,       # 365 days
     "year": 31_536_000,
 }
 
@@ -41,48 +43,48 @@ MAX_WINDOWS = 10
 
 
 class WindowError(ValueError):
-    """Window string samajh nahi aayi."""
+    """The window string could not be understood."""
 
 
 @dataclass(frozen=True)
 class Window:
-    label: str          # jaisa user ne likha — response me wahi key banti hai
+    label: str          # exactly as written by the caller; becomes the response key
     seconds: int
 
     def contains(self, age_seconds: int) -> bool:
-        # Future ke timestamps (clock skew) ko andar hi maana jaata hai
+        # Timestamps in the future (clock skew) count as inside the window.
         return age_seconds <= self.seconds
 
 
 def parse_one(raw: str) -> Window:
     text = (raw or "").strip().lower()
     if not text:
-        raise WindowError("khali window")
+        raise WindowError("empty window")
 
     m = _TOKEN.match(text)
     if not m:
         raise WindowError(
-            f"'{raw}' samajh nahi aaya. Jaise likhiye: 1d, 3d, 7d, 1w, 1m, 24h")
+            f"Could not understand '{raw}'. Write it like: 1d, 3d, 7d, 1w, 1m, 24h")
 
-    unit = m.group("unit") or "d"          # unit na ho to din maano
+    unit = m.group("unit") or "d"          # a bare number means days
     if unit not in _UNITS:
         raise WindowError(
-            f"'{raw}' me unit '{unit}' pata nahi. Valid: "
+            f"Unknown unit '{unit}' in '{raw}'. Valid units: "
             f"s, min, h, d, w, m/mo (month), y")
 
     seconds = float(m.group("n")) * _UNITS[unit]
     if seconds <= 0:
-        raise WindowError(f"'{raw}' zero ya negative hai")
+        raise WindowError(f"'{raw}' is zero or negative")
     return Window(label=raw.strip(), seconds=int(seconds))
 
 
 def parse(raw: str | None) -> list[Window]:
-    """Comma separated windows -> list. None/khali -> khali list."""
+    """Parse a comma-separated list of windows. None or empty gives an empty list."""
     if not raw or not raw.strip():
         return []
     parts = [p for p in (piece.strip() for piece in raw.split(",")) if p]
     if len(parts) > MAX_WINDOWS:
-        raise WindowError(f"ek baar me {MAX_WINDOWS} se zyada windows nahi")
+        raise WindowError(f"No more than {MAX_WINDOWS} windows per request")
 
     seen: set[str] = set()
     out: list[Window] = []
@@ -97,7 +99,7 @@ def parse(raw: str | None) -> list[Window]:
 
 def evaluate(windows: list[Window], published_at: datetime,
              now: datetime | None = None) -> dict:
-    """Har window ka true/false, aur saath me hisaab ka poora byora."""
+    """Answer each window, and show the arithmetic behind every answer."""
     now = now or datetime.now(timezone.utc)
     age = int((now - published_at).total_seconds())
     return {

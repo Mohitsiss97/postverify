@@ -1,13 +1,14 @@
-"""Ek platform, teen kaam.
+"""One platform, three responsibilities.
 
-PostTime aur ImageMatch me ye alag-alag the. Yahan ek hi jagah hain, kyunki
-dono ka URL parsing bilkul same tha aur dono ek hi page ko render karte the —
-alag rakhne ka matlab tha ek hi post ke liye browser do baar chalana.
+Timing and image extraction were separate concerns in the earlier reference
+services. They are unified here because the URL parsing was identical in both
+and both rendered the same page — keeping them apart meant launching a browser
+twice for a single post.
 
-Har platform ye batata hai:
-    match()         ye URL mera hai? (aur post ka id kya hai)
-    published_at()  ye post kab bana?
-    images()        is post pe kaunsi images hain?
+Every platform answers:
+    match()         is this URL mine, and what is the post ID?
+    published_at()  when was this post created?
+    images()        which images does this post carry?
 """
 from __future__ import annotations
 
@@ -18,11 +19,11 @@ from urllib.parse import ParseResult
 
 
 class UnsupportedURLError(ValueError):
-    """URL kisi bhi known platform se match nahi hua."""
+    """The URL did not match any known platform."""
 
 
 class PlatformError(RuntimeError):
-    """Platform pehchana gaya, par kaam poora nahi hua."""
+    """The platform was recognised, but the work could not be completed."""
 
     def __init__(self, message: str, *, platform: str, reason: str):
         super().__init__(message)
@@ -40,23 +41,23 @@ class Match:
 
 @dataclass(frozen=True)
 class Timing:
-    published_at: datetime      # hamesha UTC
+    published_at: datetime      # always UTC
     method: str                 # id-embedded | public-page | headless-page | api
     precision: str              # millisecond | second
 
 
 @dataclass(frozen=True)
 class ImageRef:
-    """Post pe mili ek image.
+    """An image found on the post.
 
     tier:
-      "post"  — og:image se, yaani pakka isi post ki
-      "page"  — post ke page pe mili; carousel slide ho sakti hai ya related post ki
+      "post"  — taken from og:image, so it definitively belongs to this post
+      "page"  — found on the post's page; may be a carousel slide or a related post
     """
     url: str
     tier: str = "post"
     label: str = ""
-    group: str = ""             # ek hi image ke alag resolutions
+    group: str = ""             # different resolutions of the same image
 
 
 class Platform:
@@ -69,16 +70,16 @@ class Platform:
     time_note: str = ""
     image_note: str = ""
     needs_browser: bool = False
-    optional_env: str | None = None      # ho to behtar, par zaroori nahi
+    optional_env: str | None = None      # improves results, but is not required
 
     def match(self, url: str, parts: ParseResult, host: str) -> Match | None:
         raise NotImplementedError
 
     async def load(self, match: Match) -> dict:
-        """Ek baar ka mehenga kaam — page render ya fetch.
+        """The one expensive step: render or fetch the page.
 
-        Time aur images dono isi ek nateeje se nikalte hain. Isliye ek post pe
-        browser sirf ek baar chalta hai, do baar nahi.
+        Both the timestamp and the images are derived from this single result,
+        which is why a post is only ever rendered once, not twice.
         """
         return {}
 
@@ -88,7 +89,7 @@ class Platform:
     async def images(self, match: Match, ctx: dict) -> list[ImageRef]:
         raise NotImplementedError
 
-    # -- config ----------------------------------------------------------
+    # -- configuration ---------------------------------------------------
 
     def configured(self) -> bool:
         return self.optional_env is not None and bool(os.getenv(self.optional_env))
@@ -103,7 +104,7 @@ class Platform:
         return {
             "id": self.id,
             "label": self.label,
-            "hosts": sorted(self.hosts),      # UI live chip dikhane ke liye
+            "hosts": sorted(self.hosts),      # so clients can show which hosts are live
             "sample_url": self.sample_url,
             "time_method": self.time_method,
             "time_note": self.time_note,

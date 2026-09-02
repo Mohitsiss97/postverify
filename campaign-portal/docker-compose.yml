@@ -1,15 +1,21 @@
-# Poora stack: portal + verification engine + Postgres.
+# The full stack: portal, verification engine and PostgreSQL.
 #
-# Engine alag service isliye hai ki uska kaam bilkul alag hai — wo browser
-# chalata hai (bhaari, CPU-bound), portal sirf HTTP aur DB (halka). Dono ko
-# alag-alag scale karna chahiye.
+# The engine is a separate service because its work is entirely different: it
+# runs a browser and is heavy and CPU-bound, while the portal only does HTTP and
+# database work and is light. They need to scale independently.
+#
+# Required in the environment (or an .env file beside this one):
+#   ADMIN_TOKEN   protects the portal's admin endpoints
+#   ENGINE_TOKEN  shared secret between the portal and the engine
+#   DB_PASSWORD   PostgreSQL password
 
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: portal
-      POSTGRES_PASSWORD: portal
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
       POSTGRES_DB: campaign_portal
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -20,11 +26,18 @@ services:
 
   engine:
     build: ../postverify-api
+    restart: unless-stopped
     environment:
-      ACCESS_TOKEN: ${ENGINE_TOKEN:-}
+      ENV: production
+      ACCESS_TOKEN: ${ENGINE_TOKEN:?set ENGINE_TOKEN}
       HEADLESS_MAX_CONCURRENT: "2"
-    # Chrome ko shared memory chahiye — bina iske wo bade pages pe crash karta
+    # Chromium needs shared memory; with the Docker default of 64 MB it crashes
+    # on larger pages.
     shm_size: "1gb"
+    # Not published to the host: the engine is reachable only from the portal.
+    # It is expensive to call and has no reason to face the internet.
+    expose:
+      - "8000"
     deploy:
       resources:
         limits:
@@ -32,6 +45,7 @@ services:
 
   portal:
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -40,13 +54,15 @@ services:
     environment:
       ENV: production
       LOG_JSON: "true"
-      DATABASE_URL: postgresql+asyncpg://portal:portal@db:5432/campaign_portal
+      DATABASE_URL: postgresql+asyncpg://portal:${DB_PASSWORD:?set DB_PASSWORD}@db:5432/campaign_portal
       ENGINE_URL: http://engine:8000
-      ENGINE_TOKEN: ${ENGINE_TOKEN:-}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN set kijiye}
+      ENGINE_TOKEN: ${ENGINE_TOKEN:?set ENGINE_TOKEN}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN}
     ports:
       - "8000:8000"
     volumes:
+      # Campaign creatives and the verification evidence. This must survive a
+      # container restart, or the audit trail goes with it.
       - storage:/srv/storage
 
 volumes:

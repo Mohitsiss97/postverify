@@ -1,4 +1,5 @@
-"""Admin — sab submissions dekhna, manual faisla, aur dobara check karwana."""
+"""Administration: reviewing every submission, deciding one by hand, and
+requeueing one for another check."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/v1/admin", tags=["Admin"],
                    dependencies=[Depends(require_admin)])
 
 
-@router.get("/submissions", summary="Saari submissions (filter ke saath)")
+@router.get("/submissions", summary="All submissions, with filters")
 async def list_submissions(
     response: Response,
     campaign_id: int | None = Query(None),
@@ -48,7 +49,7 @@ async def list_submissions(
 
 
 @router.get("/submissions/{submission_id}",
-            summary="Ek submission ka poora byora, har attempt ke saath")
+            summary="One submission in full, with every attempt")
 async def get_submission(submission_id: int,
                          session: AsyncSession = Depends(get_session)
                          ) -> SubmissionDetail:
@@ -62,13 +63,14 @@ async def get_submission(submission_id: int,
 
 
 @router.post("/submissions/{submission_id}/decide",
-             summary="Haath se approve ya reject karo")
+             summary="Approve or reject by hand")
 async def decide(submission_id: int, body: ManualDecision,
                  session: AsyncSession = Depends(get_session)) -> SubmissionOut:
-    """Automatic faisle ke upar admin ka faisla.
+    """An administrator's decision, overriding the automatic one.
 
-    Note bhi record me jaata hai — baad me dikhna chahiye ki kisne kya kiya
-    aur kyun, warna manual override audit trail me ek khaali khaana ban jaata.
+    The note is written into the record as well. Without it a manual override
+    would be a blank space in the audit trail, and later it must be possible to
+    see what was done and why.
     """
     submission = await session.get(Submission, submission_id)
     if submission is None:
@@ -76,7 +78,8 @@ async def decide(submission_id: int, body: ManualDecision,
     if submission.status in (SubmissionStatus.PENDING, SubmissionStatus.VERIFYING):
         raise http_error(
             status.HTTP_409_CONFLICT, "still_running",
-            "Ye submission abhi check ho rahi hai. Nateeja aane ke baad decide kijiye.")
+            "This submission is still being checked. Decide once the result "
+            "is in.")
 
     now = datetime.now(timezone.utc)
     submission.attempts += 1
@@ -93,7 +96,7 @@ async def decide(submission_id: int, body: ManualDecision,
     if body.approve:
         submission.status = SubmissionStatus.APPROVED
         submission.reason = None
-        submission.message = f"Admin ne approve kiya: {body.note}"
+        submission.message = f"Approved by an administrator: {body.note}"
         if submission.resolved_platform and submission.post_id:
             submission.dedupe_key = dedupe_key(submission.resolved_platform,
                                                 submission.post_id)
@@ -104,7 +107,7 @@ async def decide(submission_id: int, body: ManualDecision,
     else:
         submission.status = SubmissionStatus.REJECTED
         submission.reason = str(RejectReason.MANUAL_REJECT)
-        submission.message = f"Admin ne reject kiya: {body.note}"
+        submission.message = f"Rejected by an administrator: {body.note}"
         submission.dedupe_key = None
 
     submission.verified_at = now
@@ -115,16 +118,16 @@ async def decide(submission_id: int, body: ManualDecision,
 
 @router.post("/submissions/{submission_id}/recheck",
              status_code=status.HTTP_202_ACCEPTED,
-             summary="Dobara queue me daalo")
+             summary="Put it back in the queue")
 async def recheck(submission_id: int,
                   session: AsyncSession = Depends(get_session)) -> SubmissionOut:
-    """Tab kaam aata hai jab engine down tha, ya post baad me public hui."""
+    """Useful when the engine was down, or when the post was made public later."""
     submission = await session.get(Submission, submission_id)
     if submission is None:
         raise not_found("Submission")
     if submission.status in (SubmissionStatus.PENDING, SubmissionStatus.VERIFYING):
         raise http_error(status.HTTP_409_CONFLICT, "already_queued",
-                         "Ye pehle se queue me hai")
+                         "This is already in the queue")
 
     submission.status = SubmissionStatus.PENDING
     submission.reason = None
@@ -138,7 +141,7 @@ async def recheck(submission_id: int,
     return SubmissionOut.model_validate(submission)
 
 
-@router.get("/stats", summary="Campaign ka haal ek nazar me")
+@router.get("/stats", summary="Campaign health at a glance")
 async def stats(campaign_id: int | None = Query(None),
                 session: AsyncSession = Depends(get_session)) -> dict:
     where = [Submission.campaign_id == campaign_id] if campaign_id else []

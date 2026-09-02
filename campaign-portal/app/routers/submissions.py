@@ -1,4 +1,4 @@
-"""User ka hissa — campaign me enroll karna, aur apna post link submit karna."""
+"""The participant's surface: joining a campaign and submitting a post link."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -10,8 +10,7 @@ from ..db import get_session
 from ..deps import current_user, http_error, not_found
 from ..enums import CampaignStatus, SubmissionStatus
 from ..models import Campaign, CampaignAsset, Enrollment, Submission
-from ..schemas import (EnrollmentOut, SubmissionCreate, SubmissionDetail,
-                       SubmissionOut)
+from ..schemas import EnrollmentOut, SubmissionCreate, SubmissionDetail, SubmissionOut
 
 router = APIRouter(prefix="/v1", tags=["Submissions"])
 
@@ -19,7 +18,7 @@ router = APIRouter(prefix="/v1", tags=["Submissions"])
 # ---------------- enroll ----------------
 
 @router.post("/campaigns/{campaign_id}/enroll", status_code=status.HTTP_201_CREATED,
-             summary="Is campaign me shaamil ho")
+             summary="Join this campaign")
 async def enroll(campaign_id: int, user: str = Depends(current_user),
                  session: AsyncSession = Depends(get_session)) -> EnrollmentOut:
     campaign = await session.get(Campaign, campaign_id)
@@ -27,14 +26,14 @@ async def enroll(campaign_id: int, user: str = Depends(current_user),
         raise not_found("Campaign")
     if campaign.status != CampaignStatus.ACTIVE:
         raise http_error(status.HTTP_409_CONFLICT, "campaign_not_active",
-                         "Ye campaign abhi chalu nahi hai")
+                         "This campaign is not currently running")
 
     existing = await session.scalar(
         select(Enrollment).where(Enrollment.campaign_id == campaign_id,
                                  Enrollment.user_ref == user)
     )
     if existing:
-        # Dobara enroll karna galti nahi hai — wahi enrollment wapas de do.
+        # Enrolling twice is not an error; return the existing enrolment.
         return EnrollmentOut.model_validate(existing)
 
     enrollment = Enrollment(campaign_id=campaign_id, user_ref=user)
@@ -44,7 +43,7 @@ async def enroll(campaign_id: int, user: str = Depends(current_user),
     return EnrollmentOut.model_validate(enrollment)
 
 
-@router.get("/enrollments", summary="Meri enrollments")
+@router.get("/enrollments", summary="My enrolments")
 async def my_enrollments(user: str = Depends(current_user),
                          session: AsyncSession = Depends(get_session)
                          ) -> list[EnrollmentOut]:
@@ -58,22 +57,24 @@ async def my_enrollments(user: str = Depends(current_user),
 # ---------------- submit ----------------
 
 @router.post("/submissions", status_code=status.HTTP_202_ACCEPTED,
-             summary="Apne post ka link submit karo")
+             summary="Submit the link to your post")
 async def create_submission(body: SubmissionCreate,
                             user: str = Depends(current_user),
                             session: AsyncSession = Depends(get_session)
                             ) -> SubmissionOut:
-    """Submission turant save hoti hai aur `pending` lautati hai.
+    """The submission is saved immediately and comes back as `pending`.
 
-    Asli verification peeche chalti hai — Instagram/Facebook pe post kholne me
-    ~15 second lagte hain, aur user ko itni der roke rakhna theek nahi.
-    Status ke liye `GET /v1/submissions/{id}` poll kijiye.
+    The verification itself runs in the background: opening a post on Instagram
+    or Facebook takes around fifteen seconds, and holding the participant on an
+    open request for that long is poor behaviour. Poll
+    `GET /v1/submissions/{id}` for the outcome.
     """
     enrollment = await session.get(Enrollment, body.enrollment_id)
     if enrollment is None:
         raise not_found("Enrollment")
     if enrollment.user_ref != user:
-        # 404 jaan-boojh kar — 403 bata deta ki ye id maujood hai.
+        # A 404 rather than a 403, deliberately: a 403 would confirm that
+        # this enrolment ID exists.
         raise not_found("Enrollment")
 
     campaign = await session.get(Campaign, enrollment.campaign_id)
@@ -81,14 +82,14 @@ async def create_submission(body: SubmissionCreate,
         raise not_found("Campaign")
     if campaign.status != CampaignStatus.ACTIVE:
         raise http_error(status.HTTP_409_CONFLICT, "campaign_not_active",
-                         "Ye campaign abhi submissions nahi le rahi")
+                         "This campaign is not accepting submissions")
 
     if body.asset_id is not None:
         asset = await session.get(CampaignAsset, body.asset_id)
         if asset is None or asset.campaign_id != campaign.id:
-            raise not_found("Campaign ki image")
+            raise not_found("The campaign image")
 
-    # Ek hi enrollment pe do submissions ek saath queue me na hon.
+    # One enrolment must not have two submissions queued at once.
     in_flight = await session.scalar(
         select(Submission.id).where(
             Submission.enrollment_id == enrollment.id,
@@ -99,8 +100,8 @@ async def create_submission(body: SubmissionCreate,
     if in_flight:
         raise http_error(
             status.HTTP_409_CONFLICT, "already_pending",
-            "Aapka ek submission abhi check ho raha hai. Uska nateeja aane "
-            "ke baad naya bhejiye.", submission_id=in_flight)
+            "One of your submissions is being checked. Send another once "
+            "that result is in.", submission_id=in_flight)
 
     already_approved = await session.scalar(
         select(Submission.id).where(
@@ -111,8 +112,8 @@ async def create_submission(body: SubmissionCreate,
     if already_approved:
         raise http_error(
             status.HTTP_409_CONFLICT, "already_approved",
-            "Is campaign ke liye aapka ek submission pehle hi approve ho chuka hai.",
-            submission_id=already_approved)
+            "One of your submissions for this campaign has already been "
+            "approved.", submission_id=already_approved)
 
     submission = Submission(
         enrollment_id=enrollment.id,
@@ -128,7 +129,7 @@ async def create_submission(body: SubmissionCreate,
     return SubmissionOut.model_validate(submission)
 
 
-@router.get("/submissions/{submission_id}", summary="Submission ka status")
+@router.get("/submissions/{submission_id}", summary="A submission's status")
 async def get_submission(submission_id: int, user: str = Depends(current_user),
                          session: AsyncSession = Depends(get_session)
                          ) -> SubmissionDetail:
@@ -142,7 +143,7 @@ async def get_submission(submission_id: int, user: str = Depends(current_user),
     return SubmissionDetail.model_validate(submission)
 
 
-@router.get("/submissions", summary="Meri submissions")
+@router.get("/submissions", summary="My submissions")
 async def my_submissions(
     response: Response,
     campaign_id: int | None = Query(None),

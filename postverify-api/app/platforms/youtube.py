@@ -1,20 +1,21 @@
-"""YouTube — time public watch page se, image thumbnail.
+"""YouTube — timestamp from the public watch page, image from the thumbnail.
 
-Watch page pe upload time poora baitha hota hai, wahi jo bina login ke dikhta hai:
+The upload time sits in full on the watch page, exactly as it is shown to a
+logged-out visitor:
 
     <meta itemprop="uploadDate" content="2009-10-24T23:57:33-07:00">
 
-Video ki andar ki frames nahi dekhi jaatin — sirf thumbnail. Frames ke liye poora
-video download karna padta, jo bahut mehenga hai.
+Frames from inside the video are not examined, only the thumbnail. Reading
+frames would mean downloading the whole video, which is far too expensive for
+this service.
 """
 from __future__ import annotations
 
-import os
 import re
 from datetime import datetime, timezone
 from urllib.parse import ParseResult, parse_qs
 
-from .. import fetch
+from .. import config, fetch
 from .base import ImageRef, Match, Platform, PlatformError, Timing
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -35,8 +36,8 @@ class YouTube(Platform):
     hosts = frozenset({"youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"})
     sample_url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     time_method = "public-page"
-    time_note = "Watch page ka uploadDate — koi key nahi chahiye"
-    image_note = "Video ka thumbnail (andar ki frames nahi)"
+    time_note = "The uploadDate on the watch page — no API key required"
+    image_note = "The video thumbnail (frames inside the video are not read)"
     needs_browser = False
     optional_env = "YOUTUBE_API_KEY"
 
@@ -63,7 +64,8 @@ class YouTube(Platform):
         return {}
 
     async def published_at(self, match: Match, ctx: dict) -> Timing:
-        # Key ho to API pehle — uska contract stable hai. Warna public page.
+        # Prefer the API when a key is configured: its contract is stable.
+        # Otherwise fall back to the public page.
         if self.configured():
             dt = await self._from_api(match.post_id)
             if dt is not None:
@@ -73,7 +75,8 @@ class YouTube(Platform):
             try:
                 ctx["html"] = await fetch.get_html(match.render_url)
             except fetch.FetchError as e:
-                raise PlatformError(str(e), platform=self.id, reason="upstream_error") from e
+                raise PlatformError(str(e), platform=self.id,
+                                    reason="upstream_error") from e
 
         for pattern in _DATE_PATTERNS:
             m = pattern.search(ctx["html"])
@@ -83,16 +86,18 @@ class YouTube(Platform):
                 return Timing(dt, self.time_method, "second")
 
         if "Video unavailable" in ctx["html"]:
-            raise PlatformError("Video unavailable — private, deleted, ya region-blocked",
-                                platform=self.id, reason="not_visible")
+            raise PlatformError(
+                "The video is unavailable — private, deleted or region-blocked",
+                platform=self.id, reason="not_visible")
         raise PlatformError(
-            "Watch page pe uploadDate nahi mila — YouTube ne markup badal diya ho sakta hai",
+            "No uploadDate was found on the watch page; YouTube may have "
+            "changed its markup",
             platform=self.id, reason="upstream_error")
 
     async def _from_api(self, video_id: str) -> datetime | None:
-        """API fail ho jaye to None — page fallback chalta rahega."""
+        """Return None if the API call fails, so the page fallback still runs."""
         import httpx
-        key = os.getenv("YOUTUBE_API_KEY")
+        key = config.youtube_api_key()
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 r = await client.get(_API, params={"part": "snippet", "id": video_id,
@@ -107,10 +112,9 @@ class YouTube(Platform):
         except Exception:
             return None
 
-
     async def images(self, match: Match, ctx: dict) -> list[ImageRef]:
-        # Ek hi image, alag resolutions me — same group, taaki pehli jo download
-        # ho jaye wahi use ho aur chaaron compare na hon.
+        # One image at several resolutions. They share a group so that the
+        # first one that downloads is used, rather than comparing all four.
         return [ImageRef(f"https://i.ytimg.com/vi/{match.post_id}/{q}.jpg",
-                         "post", "video ka thumbnail", group="thumbnail")
+                         "post", "video thumbnail", group="thumbnail")
                 for q in _QUALITIES]

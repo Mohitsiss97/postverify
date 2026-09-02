@@ -1,10 +1,11 @@
-"""LinkedIn — time offline, images render se.
+"""LinkedIn — timestamp offline, images from a rendered page.
 
-Activity URN bhi snowflake-shaped hai, bas epoch plain Unix hai. Matlab time ke
-liye koi network call nahi.
+The activity URN is snowflake-shaped as well, with a plain Unix epoch, so the
+timestamp costs no network call.
 
-Images ke liye browser chahiye: plain HTTP pe LinkedIn og:image me apna favicon
-bhej deta hai (test karke dekha), asli media licdn CDN pe hoti hai.
+Images do require a browser: over plain HTTP LinkedIn returns its own favicon
+as og:image (confirmed by testing); the real media sits on the licdn CDN and
+only appears once the page has rendered.
 """
 from __future__ import annotations
 
@@ -28,13 +29,13 @@ def pick_media(html: str) -> list[ImageRef]:
         if _JUNK.search(url) or not _MEDIA.search(url):
             continue
         seen.add(url.split("?")[0])
-        out.append(ImageRef(url, "post", "post ki main image"))
+        out.append(ImageRef(url, "post", "main post image"))
     for url in _IMG.findall(html):
         key = url.split("?")[0]
         if key in seen or not _MEDIA.search(url) or _JUNK.search(url):
             continue
         seen.add(key)
-        out.append(ImageRef(url, "page", "post page pe mili"))
+        out.append(ImageRef(url, "page", "found on the post page"))
     return out
 
 
@@ -45,8 +46,8 @@ class LinkedIn(Platform):
     sample_url = ("https://www.linkedin.com/feed/update/"
                   "urn:li:activity:7250000000000000000/")
     time_method = "id-embedded"
-    time_note = "Activity URN ke upper 41 bits — offline, koi network call nahi"
-    image_note = "Page render karke licdn CDN ki images"
+    time_note = "Upper 41 bits of the activity URN — offline, no network call"
+    image_note = "licdn CDN images, read from the rendered page"
     needs_browser = True
 
     def match(self, url: str, parts: ParseResult, host: str) -> Match | None:
@@ -59,8 +60,8 @@ class LinkedIn(Platform):
             return Match(m["id"], canonical, canonical)
         if host == "lnkd.in":
             raise UnsupportedURLError(
-                "lnkd.in short link hai — browser me kholkar full /posts/ ya "
-                "/feed/update/ URL dijiye")
+                "lnkd.in is a short link. Open it in a browser and supply the "
+                "full /posts/ or /feed/update/ URL instead.")
         return None
 
     async def published_at(self, match: Match, ctx: dict) -> Timing:
@@ -71,24 +72,26 @@ class LinkedIn(Platform):
             raise PlatformError(str(e), platform=self.id, reason="invalid_id") from e
 
     async def load(self, match: Match) -> dict:
-        # Time offline mil jaata hai; render sirf images ke liye chahiye.
+        # The timestamp is available offline; rendering is only needed for images.
         return {}
-
 
     async def images(self, match: Match, ctx: dict) -> list[ImageRef]:
         if "dom" not in ctx:
             try:
                 ctx["dom"] = await browser.render(match.render_url)
             except browser.BrowserNotAvailableError as e:
-                raise PlatformError(str(e), platform=self.id, reason="not_configured") from e
+                raise PlatformError(str(e), platform=self.id,
+                                    reason="not_configured") from e
             except browser.BrowserError as e:
-                raise PlatformError(str(e), platform=self.id, reason="upstream_error") from e
+                raise PlatformError(str(e), platform=self.id,
+                                    reason="upstream_error") from e
 
         found = pick_media(ctx["dom"])
         if not found:
             if re.search(r"authwall|sign in to see|/login", ctx["dom"], re.I):
-                raise PlatformError("LinkedIn ne authwall dikhaya — post public nahi hai",
-                                    platform=self.id, reason="not_visible")
-            raise PlatformError("Is post pe koi image nahi mili",
+                raise PlatformError(
+                    "LinkedIn returned an authwall — the post is not public",
+                    platform=self.id, reason="not_visible")
+            raise PlatformError("No image was found on this post",
                                 platform=self.id, reason="no_media")
         return found

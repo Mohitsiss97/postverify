@@ -1,21 +1,22 @@
-"""Verification rules — poore portal ka dil yahi hai.
+"""The verification rules — the heart of the portal.
 
-Har test ek business rule check karta hai. Engine fake hai, to ye tez chalte
-hain aur network pe depend nahi karte.
+Each test covers one business rule. The engine is faked, so these run fast and
+depend on nothing over the network.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
 from sqlalchemy import select
 
 from app.enums import RejectReason, SubmissionStatus
 from app.models import Submission
 from app.processing import claim, process
-from app.verification import verify_submission
-from tests.conftest import (USER, FakeEngine, enroll, engine_down, engine_result,
-                            make_campaign, submit)
+from tests.conftest import (
+    engine_down,
+    engine_result,
+    enroll,
+    make_campaign,
+    submit,
+)
 
 
 async def _pending(session) -> Submission:
@@ -24,15 +25,15 @@ async def _pending(session) -> Submission:
 
 
 async def run(session, fake_engine) -> Submission:
-    """Ek pending submission ko poore rules se guzaro."""
+    """Run one pending submission through the full set of rules."""
     submission = await _pending(session)
-    assert submission is not None, "koi pending submission hi nahi"
+    assert submission is not None, "there is no pending submission"
     await claim(session, submission.id)
     await session.refresh(submission)
     return await process(session, submission, fake_engine)
 
 
-# ---------------- sab sahi ----------------
+# ---------------- the happy path ----------------
 
 async def test_everything_correct_is_approved(client, session, fake_engine):
     campaign = make_campaign(client)
@@ -47,7 +48,7 @@ async def test_everything_correct_is_approved(client, session, fake_engine):
     assert submission.within_window is True
     assert submission.image_score == 100
     assert submission.matched_asset_id == campaign["assets"][0]["id"]
-    assert "Sab sahi" in submission.message
+    assert "Everything checks out" in submission.message
 
 
 async def test_approval_completes_the_enrollment(client, session, fake_engine):
@@ -64,7 +65,7 @@ async def test_approval_completes_the_enrollment(client, session, fake_engine):
     assert enrollment.completed_at is not None
 
 
-# ---------------- 24 ghante ka window ----------------
+# ---------------- the 24-hour window ----------------
 
 async def test_post_older_than_window_is_rejected(client, session, fake_engine):
     campaign = make_campaign(client, window_hours=24)
@@ -77,7 +78,7 @@ async def test_post_older_than_window_is_rejected(client, session, fake_engine):
     assert submission.status == SubmissionStatus.REJECTED
     assert submission.reason == RejectReason.TOO_OLD
     assert submission.within_window is False
-    assert "24 ghante" in submission.message
+    assert "within 24 hours" in submission.message
 
 
 async def test_just_inside_the_window_passes(client, session, fake_engine):
@@ -91,7 +92,8 @@ async def test_just_inside_the_window_passes(client, session, fake_engine):
 
 
 async def test_campaign_can_set_its_own_window(client, session, fake_engine):
-    """Campaign ka window default se upar hai — 48 ghante purani post chalegi."""
+    """This campaign's window is wider than the default, so a 48-hour-old
+    post is still accepted."""
     campaign = make_campaign(client, window_hours=72)
     e = enroll(client, campaign["id"])
     submit(client, e["id"])
@@ -102,8 +104,8 @@ async def test_campaign_can_set_its_own_window(client, session, fake_engine):
 
 
 async def test_old_post_does_not_try_other_creatives(client, session, fake_engine):
-    """Time fail ho gaya to baaki creatives try karne ka koi matlab nahi —
-    har try ek 15-second render hai."""
+    """Once the timing check fails there is no point trying other creatives:
+    every attempt is another 15-second render."""
     campaign = make_campaign(client)
     client.post(f"/v1/campaigns/{campaign['id']}/assets",
                 files={"file": ("second.png", b"\x89PNG\r\n\x1a\ndifferent",
@@ -115,7 +117,7 @@ async def test_old_post_does_not_try_other_creatives(client, session, fake_engin
     submission = await run(session, fake_engine)
 
     assert submission.reason == RejectReason.TOO_OLD
-    assert len(fake_engine.calls) == 1, "time fail hone ke baad rukna chahiye tha"
+    assert len(fake_engine.calls) == 1, "it should stop once timing fails"
 
 
 # ---------------- image ----------------
@@ -130,22 +132,22 @@ async def test_image_mismatch_is_rejected(client, session, fake_engine):
 
     assert submission.status == SubmissionStatus.REJECTED
     assert submission.reason == RejectReason.IMAGE_MISMATCH
-    assert "match nahi hui" in submission.message
+    assert "does not match" in submission.message
 
 
 async def test_tries_other_creatives_when_asset_not_given(client, session,
                                                           fake_engine):
-    """User ne nahi bataya kaunsa creative post kiya — hum dhoondhte hain."""
+    """The participant did not say which creative they posted, so we look."""
     campaign = make_campaign(client)
     client.post(f"/v1/campaigns/{campaign['id']}/assets",
                 files={"file": ("second.png", b"\x89PNG\r\n\x1a\nsecond",
                                 "image/png")})
     e = enroll(client, campaign["id"])
-    submit(client, e["id"])          # asset_id nahi diya
+    submit(client, e["id"])          # no asset_id given
 
     fake_engine.queue(
-        engine_result(present=False, verdict="different", score=3),   # pehla nahi
-        engine_result(present=True),                                  # doosra haan
+        engine_result(present=False, verdict="different", score=3),   # not the first
+        engine_result(present=True),                                  # the second one
     )
     submission = await run(session, fake_engine)
 
@@ -154,7 +156,8 @@ async def test_tries_other_creatives_when_asset_not_given(client, session,
 
 
 async def test_asset_id_means_exactly_one_call(client, session, fake_engine):
-    """User bata de to ek hi call — Instagram pe ye 15 second bachata hai."""
+    """When the participant says which one, it is a single call — worth 15
+    seconds on Instagram."""
     campaign = make_campaign(client)
     client.post(f"/v1/campaigns/{campaign['id']}/assets",
                 files={"file": ("second.png", b"\x89PNG\r\n\x1a\nsecond",
@@ -172,9 +175,9 @@ async def test_asset_id_means_exactly_one_call(client, session, fake_engine):
 async def test_declared_platform_must_match_the_link(client, session, fake_engine):
     campaign = make_campaign(client)
     e = enroll(client, campaign["id"])
-    submit(client, e["id"], platform="facebook")     # user ne facebook kaha
+    submit(client, e["id"], platform="facebook")     # they said Facebook
 
-    fake_engine.always(engine_result(platform="instagram"))   # link instagram ka
+    fake_engine.always(engine_result(platform="instagram"))   # the link is Instagram
     submission = await run(session, fake_engine)
 
     assert submission.reason == RejectReason.WRONG_PLATFORM
@@ -190,7 +193,7 @@ async def test_campaign_can_limit_platforms(client, session, fake_engine):
     submission = await run(session, fake_engine)
 
     assert submission.reason == RejectReason.WRONG_PLATFORM
-    assert "allowed nahi" in submission.message
+    assert "is not allowed in this campaign" in submission.message
 
 
 # ---------------- duplicate ----------------
@@ -213,8 +216,8 @@ async def test_same_post_cannot_be_submitted_twice(client, session, fake_engine)
 
 
 async def test_rejected_post_frees_the_link(client, session, fake_engine):
-    """Reject hone pe dedupe key hat jaati hai — wahi post sudhaar ke dobara
-    bheji ja sake."""
+    """Rejection clears the dedupe key, so the same post can be corrected and
+    submitted again."""
     campaign = make_campaign(client)
     e = enroll(client, campaign["id"])
 
@@ -224,10 +227,11 @@ async def test_rejected_post_frees_the_link(client, session, fake_engine):
     assert rejected.dedupe_key is None
 
 
-# ---------------- engine ki dikkat ----------------
+# ---------------- engine trouble ----------------
 
 async def test_engine_down_is_retried_not_rejected(client, session, fake_engine):
-    """Engine ka down hona user ki galti nahi — reject nahi, dobara koshish."""
+    """The engine being down is not the participant's fault: retry, never
+    reject."""
     campaign = make_campaign(client)
     e = enroll(client, campaign["id"])
     submit(client, e["id"])
@@ -251,25 +255,48 @@ async def test_retries_stop_after_max_attempts(client, session, fake_engine,
     fake_engine.always(engine_down())
 
     await run(session, fake_engine)          # attempt 1 -> pending
-    submission = await run(session, fake_engine)   # attempt 2 -> haar
+    submission = await run(session, fake_engine)   # attempt 2 -> give up
 
     assert submission.status == SubmissionStatus.ERROR
     assert submission.attempts == 2
 
 
 async def test_unsupported_url_is_a_real_rejection(client, session, fake_engine):
-    """Ye user ki galti hai, takneeki dikkat nahi — isliye retry nahi hoga."""
+    """A participant's mistake ends as `rejected`, never as `error`.
+
+    `error` is what operators watch to judge whether the system is healthy. If a
+    bad link landed there, a handful of participants pasting profile URLs would
+    look exactly like an engine outage.
+    """
     from app.engine_client import EngineError
     campaign = make_campaign(client)
     e = enroll(client, campaign["id"])
     submit(client, e["id"])
 
     fake_engine.always(EngineError(RejectReason.UNSUPPORTED_URL,
-                                   "ye link kisi platform ka nahi"))
+                                   "this link is not from any platform"))
     submission = await run(session, fake_engine)
-    assert submission.status == SubmissionStatus.ERROR
+    assert submission.status == SubmissionStatus.REJECTED
     assert submission.reason == RejectReason.UNSUPPORTED_URL
-    assert submission.next_attempt_at is None, "isme retry nahi hona chahiye"
+    assert submission.next_attempt_at is None, "this must not be retried"
+    assert submission.message, "the participant must be told what went wrong"
+
+
+async def test_engine_failure_is_an_error_not_a_rejection(client, session,
+                                                          fake_engine):
+    """The mirror image: a technical failure must not be blamed on the
+    participant, and must stay visible to operators as an error."""
+    from app.engine_client import EngineError
+    campaign = make_campaign(client)
+    e = enroll(client, campaign["id"])
+    submit(client, e["id"])
+
+    fake_engine.always(EngineError(RejectReason.ENGINE_UNAVAILABLE, "down"))
+    submission = await run(session, fake_engine)
+    assert submission.status == SubmissionStatus.PENDING, "retried, not final"
+
+    from app.config import settings
+    assert settings.max_attempts >= 2
 
 
 async def test_time_missing_is_retryable(client, session, fake_engine):
@@ -284,12 +311,12 @@ async def test_time_missing_is_retryable(client, session, fake_engine):
     assert submission.status == SubmissionStatus.PENDING
 
 
-# ---------------- campaign ki halat ----------------
+# ---------------- campaign state ----------------
 
 async def test_campaign_without_assets_says_so(client, session, fake_engine):
     campaign = make_campaign(client, with_asset=False, activate=False)
     client.patch(f"/v1/campaigns/{campaign['id']}", json={"status": "active"})
-    # activate mana kar dega, isliye seedha DB me active kar dete hain
+    # Activation is refused without a creative, so set the state directly
     from app.models import Campaign
     row = await session.get(Campaign, campaign["id"])
     row.status = "active"
@@ -300,7 +327,7 @@ async def test_campaign_without_assets_says_so(client, session, fake_engine):
     submission = await run(session, fake_engine)
 
     assert submission.reason == RejectReason.NO_CAMPAIGN_ASSETS
-    assert len(fake_engine.calls) == 0, "bina creative ke engine call nahi honi chahiye"
+    assert len(fake_engine.calls) == 0, "no engine call without a creative"
 
 
 # ---------------- audit trail ----------------
@@ -318,9 +345,9 @@ async def test_every_attempt_leaves_a_record(client, session, fake_engine):
     record = submission.records[0]
     assert record.outcome == "approved"
     assert record.attempt == 1
-    assert record.checked_asset_sha256, "kis image se compare hua, wo record me ho"
+    assert record.checked_asset_sha256, "the record must say which image was used"
     assert record.engine_response is not None
-    assert record.evidence_path, "evidence file bhi likhni chahiye"
+    assert record.evidence_path, "an evidence file must be written too"
 
 
 async def test_evidence_file_is_written(client, session, fake_engine):
@@ -344,7 +371,8 @@ async def test_evidence_file_is_written(client, session, fake_engine):
 
 
 async def test_record_survives_asset_change(client, session, fake_engine):
-    """Admin creative badal de to bhi record batata hai kis image se check hua tha."""
+    """Even after an administrator replaces the creative, the record still
+    says which image was actually checked."""
     campaign = make_campaign(client)
     asset_id = campaign["assets"][0]["id"]
     e = enroll(client, campaign["id"])
@@ -363,7 +391,8 @@ async def test_record_survives_asset_change(client, session, fake_engine):
 
 async def test_image_mismatch_still_reports_that_time_was_fine(client, session,
                                                                fake_engine):
-    """User ko dikhna chahiye ki timing theek thi, sirf image galat thi."""
+    """The participant should see that the timing was fine and only the image
+    was wrong."""
     campaign = make_campaign(client)
     e = enroll(client, campaign["id"])
     submit(client, e["id"], asset_id=campaign["assets"][0]["id"])
@@ -372,7 +401,7 @@ async def test_image_mismatch_still_reports_that_time_was_fine(client, session,
     submission = await run(session, fake_engine)
 
     assert submission.reason == RejectReason.IMAGE_MISMATCH
-    assert submission.within_window is True, "time to pass hua tha"
+    assert submission.within_window is True, "the timing check did pass"
     assert submission.age_seconds is not None
 
 

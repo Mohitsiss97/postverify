@@ -1,4 +1,4 @@
-"""Teen endpoints ka HTTP contract."""
+"""The HTTP contract of the three endpoints."""
 import cv2
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +9,7 @@ from app.main import app
 from app.platforms import ImageRef, PlatformError
 from tests.test_compare import jpg, make_image
 
-# 2018 ka tweet — hamesha purana rahega, to window checks pakke hain
+# A 2018 tweet. It only gets older, so window assertions against it stay stable.
 OLD_TWEET = "https://x.com/elonmusk/status/1026872652290379776"
 TWEET = "https://x.com/NASA/status/1935477485525180417"
 POST_IMAGE = jpg(make_image(21))
@@ -22,9 +22,9 @@ def client():
 
 @pytest.fixture()
 def stub_images(monkeypatch):
-    """Post pe ek image — na browser chale, na asli download."""
+    """One image on the post, with no browser and no real download."""
     async def images(self, match, ctx):
-        return [ImageRef("https://cdn.example/post.jpg", "post", "post ki image")]
+        return [ImageRef("https://cdn.example/post.jpg", "post", "post image")]
 
     async def get_image(url, client=None):
         return POST_IMAGE
@@ -46,6 +46,27 @@ def test_health(client):
     assert d["status"] == "ok"
     assert "x" in d["platforms"]
     assert d["locked"] is False
+    assert d["version"]
+
+
+def test_ready_reports_browser_availability(client, monkeypatch):
+    from app import browser
+    monkeypatch.setattr(browser, "available", lambda: True)
+    assert client.get("/ready").json()["status"] == "ready"
+
+
+def test_ready_is_503_when_a_needed_browser_is_missing(client, monkeypatch):
+    """A load balancer should stop routing here, but nothing should restart it.
+
+    Restarting the process will not install Chrome, which is why this is
+    separate from /health.
+    """
+    from app import browser
+    monkeypatch.setattr(browser, "available", lambda: False)
+    r = client.get("/ready")
+    assert r.status_code == 503
+    assert r.json()["status"] == "degraded"
+    assert client.get("/health").status_code == 200, "liveness must stay green"
 
 
 def test_platforms(client):
@@ -62,7 +83,7 @@ def test_root_points_at_the_docs(client):
 
 
 def test_there_is_no_web_page(client):
-    """Ye API-only service hai — koi UI, session ya media route nahi hona chahiye."""
+    """This is an API-only service: no UI, no session and no media route."""
     for path in ("/prepare", "/session/abc", "/media/abc/0.jpg"):
         assert client.get(path).status_code == 404
 
@@ -90,14 +111,14 @@ def test_time_get(client):
 
 def test_time_downloads_no_images(client, monkeypatch):
     async def boom(*a, **k):
-        raise AssertionError("/v1/time pe image download nahi honi chahiye")
+        raise AssertionError("/v1/time must not download any image")
 
     monkeypatch.setattr(fetch, "get_image", boom)
     assert client.post("/v1/time", json={"url": OLD_TWEET}).status_code == 200
 
 
 def test_time_has_no_window_keys(client):
-    """/v1/time ka kaam sirf time hai."""
+    """/v1/time answers exactly one question."""
     d = client.post("/v1/time", json={"url": OLD_TWEET}).json()
     assert "within" not in d and "image" not in d
 
@@ -160,23 +181,23 @@ def test_within_is_required(client):
 
 
 def test_bad_window_is_400(client):
-    r = client.post("/v1/within", json={"url": OLD_TWEET, "within": "1 hafta"})
+    r = client.post("/v1/within", json={"url": OLD_TWEET, "within": "1 fortnight"})
     assert r.status_code == 400
-    assert r.json()["detail"]["error"] == "bad_window"
+    assert r.json()["error"] == "bad_window"
 
 
 def test_window_parsed_before_any_work(client, monkeypatch):
-    """Galat window pe 15 second ka render shuru karne ka koi matlab nahi."""
+    """There is no point starting a 15-second render for a malformed window."""
     async def boom(*a, **k):
-        raise AssertionError("bad window pe kaam shuru nahi hona chahiye")
+        raise AssertionError("no work should start on a bad window")
 
     monkeypatch.setattr(fetch, "get_html", boom)
-    r = client.post("/v1/within", json={"url": OLD_TWEET, "within": "kachra"})
+    r = client.post("/v1/within", json={"url": OLD_TWEET, "within": "nonsense"})
     assert r.status_code == 400
 
 
 def test_month_is_not_minute(client):
-    """`m` = month, `min` = minute. Ye galti aasan hai, isliye test bhi hai."""
+    """`m` is month and `min` is minute. The confusion is easy, hence the test."""
     month = client.post("/v1/within", json={"url": OLD_TWEET, "within": "1m"}).json()
     minute = client.post("/v1/within", json={"url": OLD_TWEET, "within": "1min"}).json()
     assert month["within_detail"]["1m"]["seconds"] == 30 * 86_400
@@ -241,17 +262,17 @@ def test_verify_accepts_an_image_url(client, monkeypatch):
         return [ImageRef("https://cdn.example/post.jpg", "post", "")]
 
     async def get_image(url, client=None):
-        return POST_IMAGE          # dono taraf wahi image
+        return POST_IMAGE          # the same image on both sides
 
     monkeypatch.setattr(reg.get("x").__class__, "images", images)
     monkeypatch.setattr(fetch, "get_image", get_image)
 
-    d = verify(client, image_url="https://cdn.example/meri.jpg").json()
+    d = verify(client, image_url="https://cdn.example/mine.jpg").json()
     assert d["image"]["present"] is True
 
 
 def test_verify_can_do_the_window_too(client, stub_images):
-    """Taaki Instagram pe dobara render na karna pade."""
+    """So that Instagram does not have to be rendered a second time."""
     d = verify(client, POST_IMAGE, within="20y").json()
     assert d["is_within"] is True
     assert d["image"]["present"] is True
@@ -260,29 +281,29 @@ def test_verify_can_do_the_window_too(client, stub_images):
 def test_verify_needs_an_image(client):
     r = verify(client)
     assert r.status_code == 400
-    assert r.json()["detail"]["error"] == "bad_image"
+    assert r.json()["error"] == "bad_image"
 
 
 def test_verify_rejects_junk(client, stub_images):
-    r = verify(client, b"ye image nahi hai")
+    r = verify(client, b"this is not an image")
     assert r.status_code == 400
-    assert r.json()["detail"]["error"] == "bad_image"
+    assert r.json()["error"] == "bad_image"
 
 
 def test_junk_upload_checked_before_downloading(client, monkeypatch):
-    """Kharab upload pe post ki images download karne ka matlab nahi."""
+    """A corrupt upload must not cost a download of the post's images."""
     async def boom(*a, **k):
-        raise AssertionError("kharab upload pe download nahi hona chahiye")
+        raise AssertionError("nothing should download for a corrupt upload")
 
     monkeypatch.setattr(fetch, "get_image", boom)
-    assert verify(client, b"kachra").status_code == 400
+    assert verify(client, b"garbage").status_code == 400
 
 
-# ---------------- adhoore jawab ----------------
+# ---------------- partial answers ----------------
 
 def test_no_image_on_the_post_still_gives_time(client, monkeypatch):
     async def no_images(self, match, ctx):
-        raise PlatformError("Is tweet me koi image nahi hai",
+        raise PlatformError("This tweet carries no image",
                             platform="x", reason="no_media")
 
     monkeypatch.setattr(reg.get("x").__class__, "images", no_images)
@@ -292,21 +313,21 @@ def test_no_image_on_the_post_still_gives_time(client, monkeypatch):
 
 
 def test_within_when_time_is_missing(client, monkeypatch, stub_images):
-    """Time na mile to window ka jawab null aata hai, false nahi — wo jhooth hota."""
+    """Without a time the window answer is null, not false — false would lie."""
     async def no_time(self, match, ctx):
-        raise PlatformError("time nahi nikla", platform="x", reason="upstream_error")
+        raise PlatformError("no timestamp", platform="x", reason="upstream_error")
 
     monkeypatch.setattr(reg.get("x").__class__, "published_at", no_time)
     d = verify(client, POST_IMAGE, within="7d").json()
     assert d["within"] is None and d["within_error"]
-    assert d["image"]["present"] is True, "image match phir bhi chalna chahiye"
+    assert d["image"]["present"] is True, "the image match must still run"
 
 
 def test_everything_failing_keeps_the_real_reason(client):
-    """Pre-2010 tweet — generic 502 nahi, asli invalid_id aana chahiye."""
+    """A pre-2010 tweet must surface invalid_id, not a generic 502."""
     r = client.post("/v1/time", json={"url": "https://twitter.com/jack/status/20"})
     assert r.status_code == 422
-    assert r.json()["detail"]["error"] == "invalid_id"
+    assert r.json()["error"] == "invalid_id"
 
 
 # ---------------- errors ----------------
@@ -314,7 +335,7 @@ def test_everything_failing_keeps_the_real_reason(client):
 def test_unsupported_url(client):
     r = client.post("/v1/time", json={"url": "https://example.com/x"})
     assert r.status_code == 400
-    assert r.json()["detail"]["error"] == "unsupported_url"
+    assert r.json()["error"] == "unsupported_url"
 
 
 def test_no_browser_is_503(client, monkeypatch):
@@ -323,7 +344,83 @@ def test_no_browser_is_503(client, monkeypatch):
     monkeypatch.setattr(browser, "chrome_path", lambda: None)
     r = client.post("/v1/time", json={"url": "https://www.instagram.com/p/DceLPdrCR3L/"})
     assert r.status_code == 503
-    assert r.json()["detail"]["error"] == "not_configured"
+    assert r.json()["error"] == "not_configured"
+
+
+def test_every_error_has_the_same_shape(client):
+    """A caller should write one error parser, not one per framework layer.
+
+    The three cases below deliberately take three different routes out: our own
+    HTTPException, Pydantic validation, and the framework's own 404.
+    """
+    cases = [
+        client.post("/v1/time", json={"url": "https://example.com/x"}),   # ours
+        client.post("/v1/time", json={}),                                 # validation
+        client.get("/v1/no-such-route"),                                  # framework
+    ]
+    for r in cases:
+        body = r.json()
+        assert r.status_code >= 400
+        assert "detail" not in body, f"{r.url} is still wrapped in detail"
+        assert isinstance(body.get("error"), str) and body["error"]
+        assert isinstance(body.get("message"), str) and body["message"]
+
+
+def test_validation_error_names_the_fields(client):
+    body = client.post("/v1/time", json={}).json()
+    assert body["error"] == "invalid_request"
+    assert isinstance(body["fields"], list) and body["fields"]
+    assert body["fields"][0]["field"] == "url"
+
+
+def test_unknown_route_is_named_not_found(client):
+    r = client.get("/v1/anything")
+    assert r.status_code == 404
+    assert r.json()["error"] == "not_found"
+
+
+# ---------------- request correlation ----------------
+
+def test_every_response_carries_a_request_id(client):
+    r = client.get("/health")
+    assert r.headers["X-Request-ID"]
+
+
+def test_an_incoming_request_id_is_kept(client):
+    """A trace started by the caller must continue here, not restart."""
+    r = client.get("/health", headers={"X-Request-ID": "trace-abc-123"})
+    assert r.headers["X-Request-ID"] == "trace-abc-123"
+
+
+def test_security_headers_are_present(client):
+    r = client.get("/health")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
+
+
+# ---------------- rate limiting ----------------
+
+def test_rate_limit_returns_429_with_retry_after(monkeypatch):
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "3")
+    fresh = TestClient(app)
+    # The middleware holds its counters on the app object, which is shared, so
+    # this starts from whatever earlier tests left behind. Driving well past the
+    # limit makes the assertion independent of that history.
+    codes = [fresh.post("/v1/time", json={"url": OLD_TWEET}).status_code
+             for _ in range(8)]
+    assert 429 in codes
+    limited = fresh.post("/v1/time", json={"url": OLD_TWEET})
+    assert limited.json()["error"] == "rate_limited"
+    assert int(limited.headers["Retry-After"]) >= 1
+
+
+def test_rate_limit_never_throttles_health(monkeypatch):
+    """Health checks must keep working while a caller is being limited."""
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "1")
+    fresh = TestClient(app)
+    for _ in range(5):
+        fresh.post("/v1/time", json={"url": OLD_TWEET})
+    assert fresh.get("/health").status_code == 200
 
 
 # ---------------- access token ----------------
@@ -333,7 +430,7 @@ def test_open_by_default(client):
 
 
 def test_all_three_lock_together(client, monkeypatch):
-    monkeypatch.setenv("ACCESS_TOKEN", "khulja-sim-sim")
+    monkeypatch.setenv("ACCESS_TOKEN", "open-sesame")
     assert client.get("/health").json()["locked"] is True
     assert client.post("/v1/time", json={"url": OLD_TWEET}).status_code == 401
     assert client.post("/v1/within",
@@ -343,19 +440,19 @@ def test_all_three_lock_together(client, monkeypatch):
 
 @pytest.mark.parametrize("how", ["body", "header", "query"])
 def test_right_token_gets_through(client, monkeypatch, how):
-    monkeypatch.setenv("ACCESS_TOKEN", "khulja-sim-sim")
+    monkeypatch.setenv("ACCESS_TOKEN", "open-sesame")
     if how == "body":
-        r = client.post("/v1/time", json={"url": OLD_TWEET, "token": "khulja-sim-sim"})
+        r = client.post("/v1/time", json={"url": OLD_TWEET, "token": "open-sesame"})
     elif how == "header":
         r = client.post("/v1/time", json={"url": OLD_TWEET},
-                        headers={"X-Access-Token": "khulja-sim-sim"})
+                        headers={"X-Access-Token": "open-sesame"})
     else:
-        r = client.get("/v1/time", params={"url": OLD_TWEET, "token": "khulja-sim-sim"})
+        r = client.get("/v1/time", params={"url": OLD_TWEET, "token": "open-sesame"})
     assert r.status_code == 200
 
 
 def test_wrong_token(client, monkeypatch):
-    monkeypatch.setenv("ACCESS_TOKEN", "khulja-sim-sim")
-    r = client.post("/v1/time", json={"url": OLD_TWEET, "token": "galat"})
+    monkeypatch.setenv("ACCESS_TOKEN", "open-sesame")
+    r = client.post("/v1/time", json={"url": OLD_TWEET, "token": "wrong"})
     assert r.status_code == 401
-    assert r.json()["detail"]["error"] == "unauthorized"
+    assert r.json()["error"] == "unauthorized"

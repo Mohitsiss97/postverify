@@ -1,10 +1,15 @@
+# Runtime dependencies only. Test tooling lives in requirements-dev.txt so that
+# production images do not ship a test runner.
+
 fastapi>=0.110
 uvicorn[standard]>=0.27
 httpx>=0.26
 pydantic>=2.6
 python-multipart>=0.0.9
+
+# Headless OpenCV: the full build pulls in GUI libraries this service never uses.
 opencv-python-headless>=4.9
 numpy>=1.26
-pytest>=8.0
-pytest-asyncio>=0.23
+
+# Windows has no system timezone database, so ZoneInfo fails there without it.
 tzdata>=2024.1; sys_platform == "win32"

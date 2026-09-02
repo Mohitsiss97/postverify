@@ -1,8 +1,8 @@
-"""postverify-api ko HTTP se call karna.
+"""The HTTP client for postverify-api.
 
-Portal us service ka code copy nahi karta — usse baat karta hai. Isse dono alag
-deploy aur scale ho sakte hain (engine browser-heavy hai, portal halka), aur
-engine ka folder chhune ki zaroorat nahi padti.
+The portal does not copy the engine's code; it talks to it. That lets the two be
+deployed and scaled independently — the engine is browser-heavy and the portal
+is light — and means the engine's source tree is never touched from here.
 """
 from __future__ import annotations
 
@@ -17,7 +17,11 @@ from .enums import RejectReason
 
 
 class EngineError(Exception):
-    """Engine se kaam nahi ho paya. `reason` batata hai user ko kya kehna hai."""
+    """The engine could not complete the work.
+
+    `reason` determines what the participant is told, and whether the submission
+    is retried or rejected outright.
+    """
 
     def __init__(self, reason: RejectReason, message: str, *,
                  status: int | None = None, payload: dict | None = None):
@@ -30,7 +34,7 @@ class EngineError(Exception):
 
 @dataclass
 class EngineResult:
-    """Engine ke jawab ka wo hissa jo portal ko chahiye."""
+    """The part of the engine's response the portal actually uses."""
     platform: str | None = None
     post_id: str | None = None
     canonical_url: str | None = None
@@ -49,8 +53,9 @@ class EngineResult:
     raw: dict = field(default_factory=dict)
 
 
-# Engine ka error code -> portal ka reason. Jo yahan na ho wo takneeki maana
-# jayega (retry hoga) — kyunki anjaan error pe user ko reject kehna galat hoga.
+# Engine error code -> portal reason. Anything absent from this map is treated
+# as a technical failure and retried, because telling a participant their post
+# was rejected on the strength of an error we do not recognise would be wrong.
 _ERROR_MAP: dict[str, RejectReason] = {
     "unsupported_url": RejectReason.UNSUPPORTED_URL,
     "not_visible": RejectReason.POST_NOT_FOUND,
@@ -61,7 +66,10 @@ _ERROR_MAP: dict[str, RejectReason] = {
     "not_configured": RejectReason.ENGINE_UNAVAILABLE,
     "disabled": RejectReason.ENGINE_UNAVAILABLE,
     "upstream_error": RejectReason.ENGINE_UNAVAILABLE,
+    "rate_limited": RejectReason.ENGINE_UNAVAILABLE,
 }
+
+_GENERIC_FAILURE = "Verification failed"
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -96,24 +104,34 @@ def _shape(payload: dict, status: int, duration_ms: int) -> EngineResult:
     )
 
 
-def _raise_for(payload: dict, status: int) -> None:
+def _error_code_and_message(payload: dict) -> tuple[str, str]:
+    """Read the error out of a response, accepting both envelope shapes.
+
+    The engine now returns errors flat, as {"error", "message"}. Older builds
+    wrapped them in FastAPI's "detail". Both are accepted so that the portal
+    keeps working across a rolling deployment where the two services are briefly
+    on different versions.
+    """
+    if isinstance(payload.get("error"), str):
+        return payload["error"], str(payload.get("message") or _GENERIC_FAILURE)
+
     detail = payload.get("detail")
     if isinstance(detail, dict):
-        code = str(detail.get("error", ""))
-        message = str(detail.get("message", "")) or "Verification fail hua"
-    else:
-        code, message = "", str(detail or "Verification fail hua")
+        return (str(detail.get("error", "")),
+                str(detail.get("message", "")) or _GENERIC_FAILURE)
+    return "", str(detail or _GENERIC_FAILURE)
 
-    reason = _ERROR_MAP.get(code)
-    if reason is None:
-        # Anjaan error = takneeki dikkat maano. User ko galat se reject karne se
-        # behtar hai dobara koshish karna.
-        reason = RejectReason.ENGINE_UNAVAILABLE
+
+def _raise_for(payload: dict, status: int) -> None:
+    code, message = _error_code_and_message(payload)
+    # An unrecognised code means a technical problem. Retrying is better than
+    # rejecting a participant on the basis of an error we cannot interpret.
+    reason = _ERROR_MAP.get(code, RejectReason.ENGINE_UNAVAILABLE)
     raise EngineError(reason, message, status=status, payload=payload)
 
 
 class VerificationEngine:
-    """postverify-api ka client. Ek hi AsyncClient reuse hota hai."""
+    """The postverify-api client. One AsyncClient is reused across calls."""
 
     def __init__(self, base_url: str | None = None, token: str | None = None,
                  timeout: float | None = None):
@@ -143,15 +161,22 @@ class VerificationEngine:
             return r.json()
         except httpx.HTTPError as e:
             raise EngineError(RejectReason.ENGINE_UNAVAILABLE,
-                              f"Engine tak nahi pahunche: {e}") from e
+                              f"The engine could not be reached: {e}") from e
 
     async def verify(self, post_url: str, image: bytes, *,
-                     filename: str = "asset.jpg") -> EngineResult:
-        """Ek call me dono: post ka time, aur di hui image match hui ya nahi."""
+                     filename: str = "asset.jpg",
+                     request_id: str | None = None) -> EngineResult:
+        """One call for both questions: when the post was published, and whether
+        the given image appears in it.
+
+        The request ID is forwarded so that a submission can be followed across
+        both services in the logs.
+        """
         started = time.monotonic()
         data: dict[str, str] = {"url": post_url}
         if self.token:
             data["token"] = self.token
+        headers = {"X-Request-ID": request_id} if request_id else None
 
         try:
             client = await self._http()
@@ -159,14 +184,16 @@ class VerificationEngine:
                 "/v1/verify",
                 data=data,
                 files={"image": (filename, image, "application/octet-stream")},
+                headers=headers,
             )
         except httpx.TimeoutException as e:
             raise EngineError(
                 RejectReason.ENGINE_UNAVAILABLE,
-                "Verification service ne waqt pe jawab nahi diya") from e
+                "The verification service did not respond in time") from e
         except httpx.HTTPError as e:
-            raise EngineError(RejectReason.ENGINE_UNAVAILABLE,
-                              f"Verification service tak nahi pahunche: {e}") from e
+            raise EngineError(
+                RejectReason.ENGINE_UNAVAILABLE,
+                f"The verification service could not be reached: {e}") from e
 
         duration_ms = int((time.monotonic() - started) * 1000)
 
@@ -175,7 +202,7 @@ class VerificationEngine:
         except ValueError as e:
             raise EngineError(
                 RejectReason.ENGINE_UNAVAILABLE,
-                f"Engine ne JSON nahi bheja (HTTP {response.status_code})") from e
+                f"The engine did not return JSON (HTTP {response.status_code})") from e
 
         if response.status_code >= 400:
             _raise_for(payload, response.status_code)

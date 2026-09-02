@@ -1,12 +1,13 @@
-"""Decision ko DB me utaarna, aur retry ka hisaab.
+"""Writing a decision to the database, and deciding whether to retry.
 
-Yahan do cheezein alag rakhi gayi hain:
-    submission          user ko dikhne wala ek status
-    verification_record har koshish ka saboot
+Two things are kept apart here:
+    submission          the single status a participant sees
+    verification_record the evidence for one attempt
 
-Retry sirf takneeki fail pe hota hai (engine down, timeout). Business rejection
-final hai — "image match nahi hui" ko dobara chala kar jawab nahi badlega, aur
-har retry Instagram pe 15 second ka render hai.
+Retries happen only on technical failures — the engine being down, or a timeout.
+A business rejection is final: running "the image did not match" a second time
+will not produce a different answer, and every retry costs another fifteen-second
+render on Instagram.
 """
 from __future__ import annotations
 
@@ -19,20 +20,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .engine_client import VerificationEngine
-from .enums import (EnrollmentStatus, RejectReason, RETRYABLE, SubmissionStatus,
-                    message_for)
+from .enums import RETRYABLE, EnrollmentStatus, RejectReason, SubmissionStatus, message_for
 from .models import Enrollment, Submission, VerificationRecord
-from .verification import (Decision, dedupe_key, next_retry_at, verify_submission,
-                           write_evidence)
+from .verification import (
+    Decision,
+    dedupe_key,
+    next_retry_at,
+    verify_submission,
+    write_evidence,
+)
 
 log = logging.getLogger("portal.processing")
 
 
 async def claim(session: AsyncSession, submission_id: int) -> bool:
-    """Submission ko `verifying` me le jao — sirf tab jab wo abhi tak pending ho.
+    """Move a submission to `verifying`, but only if it is still pending.
 
-    Ye guard hi do workers ko ek hi submission uthane se rokta hai: UPDATE ka
-    rowcount 0 aaya matlab kisi aur ne pehle le liya.
+    This guard is what stops two workers taking the same submission: a rowcount
+    of 0 from the UPDATE means someone else claimed it first.
     """
     now = datetime.now(timezone.utc)
     result = await session.execute(
@@ -93,7 +98,7 @@ def _record_from(submission: Submission, decision: Decision) -> VerificationReco
 
 
 def _apply(submission: Submission, decision: Decision) -> None:
-    """Decision ke hisaab se submission ke fields set karo."""
+    """Set the submission's fields according to the decision."""
     result = decision.result
     now = datetime.now(timezone.utc)
 
@@ -119,8 +124,9 @@ def _apply(submission: Submission, decision: Decision) -> None:
     if decision.approved:
         submission.status = SubmissionStatus.APPROVED
         submission.verified_at = now
-        # dedupe_key sirf zinda submissions pe rehti hai — reject hote hi hat
-        # jaati hai, taaki wahi post koi aur (ya wahi user sudhaar ke) bhej sake.
+        # dedupe_key only exists on live submissions. It is cleared on
+        # rejection so the same post can be submitted again, by someone else or
+        # by the same participant after fixing the problem.
         if result and result.platform and result.post_id:
             submission.dedupe_key = dedupe_key(result.platform, result.post_id)
         return
@@ -132,7 +138,7 @@ def _apply(submission: Submission, decision: Decision) -> None:
         submission.verified_at = now
         return
 
-    # ERROR — retry karna hai ya haar maan lein
+    # ERROR: either retry, or give up and record the failure
     retryable = decision.reason in RETRYABLE
     if retryable and submission.attempts < settings.max_attempts:
         submission.status = SubmissionStatus.PENDING
@@ -152,7 +158,7 @@ async def _complete_enrollment(session: AsyncSession, submission: Submission) ->
 
 async def process(session: AsyncSession, submission: Submission,
                   engine: VerificationEngine) -> Submission:
-    """Ek claimed submission ko verify karke uska nateeja likh do."""
+    """Verify one claimed submission and write down the outcome."""
     decision = await verify_submission(session, submission, engine)
 
     session.add(_record_from(submission, decision))
@@ -164,8 +170,9 @@ async def process(session: AsyncSession, submission: Submission,
     try:
         await session.commit()
     except IntegrityError:
-        # dedupe_key pe unique index — matlab do submissions ne ek saath ek hi
-        # post pe approve hone ki koshish ki. Jo haara, use duplicate bata do.
+        # The unique index on dedupe_key fired, which means two submissions
+        # raced to be approved for the same post. The one that lost is told it
+        # is a duplicate.
         await session.rollback()
         await session.refresh(submission)
         submission.status = SubmissionStatus.REJECTED
@@ -174,7 +181,7 @@ async def process(session: AsyncSession, submission: Submission,
         submission.dedupe_key = None
         submission.verified_at = datetime.now(timezone.utc)
         await session.commit()
-        log.info("submission %s duplicate race me haari", submission.id)
+        log.info("submission %s lost the duplicate race", submission.id)
 
     log.info("submission %s -> %s (%s, attempt %s, %s assets tried)",
              submission.id, submission.status, submission.reason or "-",

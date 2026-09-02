@@ -1,19 +1,19 @@
-"""HTTP layer ke saanjhe tukde — UI endpoints aur /api/v1 dono ise use karte hain.
+"""Shared HTTP concerns: authentication, error translation and upload reading.
 
-Alag file isliye hai taaki main.py aur api.py ek doosre ko import na karein.
+These live in their own module so that the route modules never have to import
+one another.
 """
 from __future__ import annotations
 
-import os
 import secrets
 
 from fastapi import HTTPException, UploadFile
 
-from . import fetch
+from . import config, fetch
 from .compare import ImageError
 from .platforms import PlatformError, UnsupportedURLError
 
-# Platform ki dikkat -> HTTP status
+# Platform-level failure reason -> HTTP status code.
 STATUS = {
     "invalid_id": 422,
     "no_media": 404,
@@ -25,25 +25,28 @@ STATUS = {
 
 
 def guard(token: str | None, header: str | None) -> None:
-    """ACCESS_TOKEN set ho to mehenge endpoints sirf usi ke saath chalein.
+    """Require ACCESS_TOKEN on the expensive endpoints when one is configured.
 
-    Public URL pe ye zaroori hai: har request pe browser chalta hai aur platform
-    ki taraf jaata hai. Bina rok ke koi bhi aapke server se Instagram/Facebook
-    hit kar sakta hai, aur block aapke IP pe aayega.
+    This matters on any public deployment: every request launches a browser and
+    reaches out to the platform. Left open, anyone can drive Instagram and
+    Facebook traffic through your server, and the resulting block lands on your
+    IP address.
 
-    Set na ho to service khuli rehti hai (local use ke liye theek).
+    When ACCESS_TOKEN is unset the service stays open, which is convenient for
+    local use and is why the deployment checklist treats setting it as
+    mandatory.
     """
-    expected = os.getenv("ACCESS_TOKEN")
+    expected = config.access_token()
     if not expected:
         return
     given = header or token or ""
     if not secrets.compare_digest(given, expected):
         raise HTTPException(401, {"error": "unauthorized",
-                                  "message": "Sahi access token chahiye"})
+                                  "message": "A valid access token is required"})
 
 
 def fail(exc: Exception) -> HTTPException:
-    """Andar ki exception ko HTTP error me badlo, reason ke saath."""
+    """Translate an internal exception into an HTTP error that states the cause."""
     if isinstance(exc, UnsupportedURLError):
         return HTTPException(400, {"error": "unsupported_url", "message": str(exc)})
     if isinstance(exc, ImageError):
@@ -57,7 +60,7 @@ def fail(exc: Exception) -> HTTPException:
 
 
 async def read_upload(image: UploadFile | None) -> bytes | None:
-    """Upload sirf memory me — disk pe kabhi nahi jaati."""
+    """Read an uploaded image into memory. It is never written to disk."""
     if image is None or not image.filename:
         return None
     data = await image.read()
@@ -65,6 +68,6 @@ async def read_upload(image: UploadFile | None) -> bytes | None:
         return None
     if len(data) > fetch.MAX_IMAGE_BYTES:
         raise fetch.TooLargeError(
-            f"Image bahut badi hai ({len(data) // 1024 // 1024} MB). "
-            f"Limit {fetch.MAX_IMAGE_BYTES // 1024 // 1024} MB hai.")
+            f"The image is too large ({len(data) // 1024 // 1024} MB). "
+            f"The limit is {fetch.MAX_IMAGE_BYTES // 1024 // 1024} MB.")
     return data

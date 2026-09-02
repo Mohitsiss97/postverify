@@ -1,16 +1,20 @@
 """Platform registry.
 
-Yahan koi picker nahi hai — user sirf URL deta hai aur platform khud pehchana
-jaata hai. Isliye detect() hi asli entry point hai.
+There is no platform picker in this API: the caller supplies only a URL and the
+platform is identified from it, which makes detect() the real entry point.
 
-    PLATFORMS=x,youtube uvicorn app.main:app    # sirf ye do, browser chahiye hi nahi
+The PLATFORMS environment variable narrows the registry, which is how a
+deployment that only needs the offline platforms avoids requiring a browser at
+all:
+
+    PLATFORMS=x,youtube uvicorn app.main:app
 """
 from __future__ import annotations
 
-import os
 import re
 from urllib.parse import ParseResult, urlparse
 
+from .. import config
 from .base import (
     ImageRef,
     Match,
@@ -35,15 +39,15 @@ _BY_ID = {p.id: p for p in CATALOG}
 
 
 def _enabled_ids() -> list[str]:
-    raw = (os.getenv("PLATFORMS") or "").strip()
+    raw = config.platforms_raw()
     if not raw:
         return [p.id for p in CATALOG]
     wanted = [w.strip().lower() for w in raw.split(",") if w.strip()]
     unknown = [w for w in wanted if w not in _BY_ID]
     if unknown:
         raise RuntimeError(
-            f"PLATFORMS env me unknown platform: {', '.join(unknown)}. "
-            f"Valid: {', '.join(_BY_ID)}")
+            f"Unknown platform in the PLATFORMS environment variable: "
+            f"{', '.join(unknown)}. Valid values: {', '.join(_BY_ID)}")
     return wanted
 
 
@@ -67,7 +71,7 @@ def get(platform_id: str) -> Platform:
 def split(url: str) -> tuple[str, ParseResult, str]:
     url = (url or "").strip()
     if not url:
-        raise UnsupportedURLError("URL khali hai")
+        raise UnsupportedURLError("The URL is empty")
     if not re.match(r"^https?://", url, re.I):
         url = "https://" + url
     parts = urlparse(url)
@@ -78,10 +82,11 @@ def split(url: str) -> tuple[str, ParseResult, str]:
 
 
 def detect(url: str) -> tuple[Platform, Match]:
-    """URL se platform pehchano.
+    """Identify the platform from the URL.
 
-    Poora catalog dekha jaata hai, sirf enabled nahi — taaki disabled platform ka
-    link daalne pe "ye X ka link hai par X band hai" bata sakein.
+    The whole catalogue is consulted, not just the enabled subset, so that a
+    link to a disabled platform can be reported as "this is an X link, but X is
+    turned off" rather than as an unrecognised URL.
     """
     normalized, parts, host = split(url)
     for platform in CATALOG:
@@ -89,5 +94,5 @@ def detect(url: str) -> tuple[Platform, Match]:
         if m:
             return platform, m
     raise UnsupportedURLError(
-        f"Ye URL kisi supported platform se match nahi hua: {normalized}. "
-        f"Support hain: {', '.join(p.label for p in CATALOG)}")
+        f"This URL does not match any supported platform: {normalized}. "
+        f"Supported platforms: {', '.join(p.label for p in CATALOG)}")

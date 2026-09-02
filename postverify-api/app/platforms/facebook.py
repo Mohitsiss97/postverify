@@ -1,13 +1,13 @@
-"""Facebook — ek hi render se time aur images dono.
+"""Facebook — both the timestamp and the images come from a single render.
 
-Time embedded JSON me hota hai (DOM me <time> nahi hota):
+The timestamp lives in embedded JSON; there is no <time> element in the DOM:
 
     "creation_time":1788012882
     "publish_time":1788012882
 
-Permalink pe ye dono exactly ek-ek baar aate hain aur equal hote hain. Page
-listing pe iske ulat kai posts ke timestamps hote hain — isliye ek se zyada
-alag values mile to guess nahi karte, error dete hain.
+On a permalink each of these appears exactly once and the two agree. A page
+listing, by contrast, carries the timestamps of many posts — so when more than
+one distinct value is present the extractor raises rather than guessing.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ _JUNK = re.compile(r"/hads-ak|/rsrc\.php|static\.xx\.fbcdn\.net")
 _LOGIN = re.compile(r"login_form|You must log in", re.I)
 _GONE = re.compile(r"content isn.t available|page isn.t available", re.I)
 
-_FLOOR = datetime(2004, 2, 1, tzinfo=timezone.utc)      # Facebook launch
+_FLOOR = datetime(2004, 2, 1, tzinfo=timezone.utc)      # Facebook's launch
 
 
 def _plausible(ts: int) -> bool:
@@ -52,8 +52,8 @@ def _plausible(ts: int) -> bool:
 def extract_time(dom: str, expect_id: str | None = None) -> tuple[datetime, str]:
     if expect_id and expect_id.isdigit() and f'"{expect_id}"' not in dom:
         raise PlatformError(
-            f"Page pe post {expect_id} mila hi nahi — link galat ho sakta hai, "
-            f"ya post ab public nahi hai",
+            f"Post {expect_id} was not present on the page. The link may be "
+            f"wrong, or the post may no longer be public.",
             platform="facebook", reason="not_visible")
 
     for name, pattern in _TIME_FIELDS:
@@ -63,13 +63,13 @@ def extract_time(dom: str, expect_id: str | None = None) -> tuple[datetime, str]
             continue
         if len(found) > 1:
             raise PlatformError(
-                f"DOM me {len(found)} alag {name} values hain — kaunsa is post ka hai, "
-                f"pakka nahi kaha ja sakta",
+                f"The DOM contains {len(found)} distinct {name} values, so the "
+                f"one belonging to this post cannot be identified with certainty",
                 platform="facebook", reason="upstream_error")
         return datetime.fromtimestamp(found.pop(), tz=timezone.utc), name
 
     raise PlatformError(
-        "Page pe koi timestamp nahi mila — Facebook ne markup badal diya ho sakta hai",
+        "No timestamp was found on the page; Facebook may have changed its markup",
         platform="facebook", reason="upstream_error")
 
 
@@ -80,13 +80,13 @@ def pick_media(html: str) -> list[ImageRef]:
         key = url.split("?")[0]
         if key not in seen:
             seen.add(key)
-            out.append(ImageRef(url, "post", "post ki main image"))
+            out.append(ImageRef(url, "post", "main post image"))
     for url in _IMG.findall(html):
         key = url.split("?")[0]
         if key in seen or not _CDN.search(url) or _JUNK.search(url):
             continue
         seen.add(key)
-        out.append(ImageRef(url, "page", "post page pe mili"))
+        out.append(ImageRef(url, "page", "found on the post page"))
     return out
 
 
@@ -97,8 +97,8 @@ class Facebook(Platform):
                        "web.facebook.com", "mbasic.facebook.com"})
     sample_url = "https://www.facebook.com/NASA/posts/1615702003258503"
     time_method = "headless-page"
-    time_note = "Page render karke embedded JSON ka creation_time"
-    image_note = "Usi render se CDN images (UI assets filter karke)"
+    time_note = "creation_time from the embedded JSON of the rendered page"
+    image_note = "CDN images from the same render, with UI assets filtered out"
     needs_browser = True
 
     def match(self, url: str, parts: ParseResult, host: str) -> Match | None:
@@ -123,26 +123,29 @@ class Facebook(Platform):
         try:
             dom = await browser.render(match.render_url)
         except browser.BrowserNotAvailableError as e:
-            raise PlatformError(str(e), platform=self.id, reason="not_configured") from e
+            raise PlatformError(str(e), platform=self.id,
+                                reason="not_configured") from e
         except browser.BrowserError as e:
-            raise PlatformError(str(e), platform=self.id, reason="upstream_error") from e
+            raise PlatformError(str(e), platform=self.id,
+                                reason="upstream_error") from e
 
         if _GONE.search(dom) and not any(p.search(dom) for _, p in _TIME_FIELDS):
-            raise PlatformError("Post available nahi hai — delete ya private ho sakta hai",
-                                platform=self.id, reason="not_visible")
+            raise PlatformError(
+                "The post is not available; it may have been deleted or made private",
+                platform=self.id, reason="not_visible")
         if _LOGIN.search(dom) and not any(p.search(dom) for _, p in _TIME_FIELDS):
-            raise PlatformError("Facebook ne login maanga — ye post public nahi hai",
-                                platform=self.id, reason="not_visible")
+            raise PlatformError(
+                "Facebook asked for a login — this post is not public",
+                platform=self.id, reason="not_visible")
         return {"dom": dom}
 
     async def published_at(self, match: Match, ctx: dict) -> Timing:
         dt, _field = extract_time(ctx["dom"], match.post_id)
         return Timing(dt, self.time_method, "second")
 
-
     async def images(self, match: Match, ctx: dict) -> list[ImageRef]:
         found = pick_media(ctx["dom"])
         if not found:
-            raise PlatformError("Is post pe koi image nahi mili",
+            raise PlatformError("No image was found on this post",
                                 platform=self.id, reason="no_media")
         return found

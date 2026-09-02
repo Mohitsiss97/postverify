@@ -1,10 +1,11 @@
-"""X (Twitter) — time offline, images og:image se.
+"""X (Twitter) — timestamp offline, images from og:image.
 
-Time ke liye kuch fetch karne ki zaroorat hi nahi: status ID ek snowflake hai
-jiske upper 41 bits millisecond timestamp hote hain.
+The timestamp requires no fetch at all: the status ID is a snowflake whose
+upper 41 bits are a millisecond timestamp.
 
-Images ke liye ek plain HTTP call. Dhyan: text-only tweet pe og:image me author
-ki profile picture aati hai, post ki media nahi — usse filter karna zaroori hai.
+Images need one plain HTTP call. Note that on a text-only tweet og:image
+carries the author's profile picture rather than any post media, so that has to
+be filtered out.
 """
 from __future__ import annotations
 
@@ -29,9 +30,9 @@ def pick_media(html: str) -> list[ImageRef]:
         if _MEDIA.search(url):
             big = re.sub(r"[?&]name=\w+", "", url)
             out.append(ImageRef(big + ("&" if "?" in big else "?") + "name=large",
-                                "post", "tweet ki image"))
+                                "post", "tweet image"))
         else:
-            out.append(ImageRef(url, "page", "page pe mili"))
+            out.append(ImageRef(url, "page", "found on the page"))
     return out
 
 
@@ -42,8 +43,8 @@ class X(Platform):
                        "vxtwitter.com", "fxtwitter.com", "fixupx.com"})
     sample_url = "https://x.com/NASA/status/1935477485525180417"
     time_method = "id-embedded"
-    time_note = "Status ID ke upper 41 bits — offline, koi network call nahi"
-    image_note = "og:image se (profile picture filter karke)"
+    time_note = "Upper 41 bits of the status ID — offline, no network call"
+    image_note = "From og:image, with profile pictures filtered out"
     needs_browser = False
 
     def match(self, url: str, parts: ParseResult, host: str) -> Match | None:
@@ -62,20 +63,20 @@ class X(Platform):
             raise PlatformError(str(e), platform=self.id, reason="invalid_id") from e
 
     async def load(self, match: Match) -> dict:
-        # Time offline nikal aata hai; page sirf images ke liye chahiye.
+        # The timestamp is available offline; the page is only needed for images.
         return {}
-
 
     async def images(self, match: Match, ctx: dict) -> list[ImageRef]:
         if "html" not in ctx:
             try:
                 ctx["html"] = await fetch.get_html(match.render_url)
             except fetch.FetchError as e:
-                raise PlatformError(str(e), platform=self.id, reason="upstream_error") from e
+                raise PlatformError(str(e), platform=self.id,
+                                    reason="upstream_error") from e
 
         found = pick_media(ctx["html"])
         if not any(i.tier == "post" for i in found):
             raise PlatformError(
-                "Is tweet me koi image nahi hai — sirf text ho sakta hai",
+                "This tweet carries no image; it may be text only",
                 platform=self.id, reason="no_media")
         return found

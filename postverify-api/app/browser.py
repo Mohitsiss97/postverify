@@ -1,20 +1,19 @@
-"""Headless Chrome — un platforms ke liye jinka content server-side aata hi nahi.
+"""Headless Chrome, for the platforms whose content never arrives server-side.
 
-(PostTime service se copy kiya gaya hai, jaan-boojh kar — dono services ek doosre
-pe depend na karein isliye. Wahan ka code chhua nahi gaya.)
+Instagram serves a bare JavaScript shell to a plain HTTP fetch; the real data
+only appears once the page has run in a browser. Reaching it therefore requires
+driving a real browser.
 
-Instagram ka page plain fetch pe khali JS shell hota hai; asli data browser ke
-andar chalne ke baad aata hai. Uske liye ek real browser chalana padta hai.
+That is expensive: roughly six seconds and one Chrome process per page. So
+concurrency is capped — without a cap, twenty simultaneous requests open twenty
+Chrome processes and the machine stops responding. Requests beyond the cap wait
+in the queue and receive a 503 if they time out.
 
-Ye mehenga hai: ~6 second aur ek Chrome process per page. Isliye concurrency
-capped hai — warna 20 request aate hi 20 Chrome khul jayenge aur machine baith
-jayegi. Cap se zyada requests queue me wait karti hain; timeout pe 503 milta hai.
-
-Config (sab optional):
-    CHROME_PATH             Chrome/Edge ka path, agar auto-detect fail ho
-    HEADLESS_MAX_CONCURRENT ek waqt me kitne browser (default 4)
-    HEADLESS_TIMEOUT_SEC    ek page pe max intezaar (default 45)
-    HEADLESS_WAIT_MS        page ko render hone ka time (default 6000)
+Configuration (all optional):
+    CHROME_PATH             path to Chrome/Edge, if auto-detection fails
+    HEADLESS_MAX_CONCURRENT browsers running at once (default 4)
+    HEADLESS_TIMEOUT_SEC    maximum wait for one page (default 45)
+    HEADLESS_WAIT_MS        time allowed for the page to render (default 6000)
 """
 from __future__ import annotations
 
@@ -25,22 +24,25 @@ import sys
 import tempfile
 from functools import lru_cache
 
+from . import config
+
 
 class BrowserError(RuntimeError):
     pass
 
 
 class BrowserNotAvailableError(BrowserError):
-    """Machine pe Chrome/Edge mila hi nahi."""
+    """No Chrome or Edge installation was found on this machine."""
 
 
 class RenderTimeoutError(BrowserError):
     pass
 
 
-# Chhota window Instagram ko mobile layout pe bhej deta hai jisme timestamp hota
-# hi nahi — isliye desktop size zaroori hai. Images/fonts off karne se 16s se
-# 6s ho jaata hai (naap kar dekha), aur DOM wahi rehta hai.
+# A small window pushes Instagram to its mobile layout, which carries no
+# timestamp at all, so a desktop window size is mandatory. Disabling images and
+# fonts takes a render from roughly 16s to 6s (measured) and leaves the DOM
+# unchanged.
 _FLAGS = (
     "--headless=new",
     "--disable-gpu",
@@ -69,8 +71,8 @@ _UNIX_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-br
 
 @lru_cache(maxsize=1)
 def chrome_path() -> str | None:
-    """Chrome ya Edge dhoondo. Dono Chromium hain, flags same chalte hain."""
-    explicit = os.getenv("CHROME_PATH")
+    """Locate Chrome or Edge. Both are Chromium, so the same flags apply."""
+    explicit = config.chrome_path()
     if explicit:
         return explicit if os.path.exists(explicit) else None
 
@@ -98,42 +100,35 @@ def available() -> bool:
     return chrome_path() is not None
 
 
-def _int_env(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.getenv(name, "")))
-    except ValueError:
-        return default
-
-
 _sem: asyncio.Semaphore | None = None
 _sem_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _semaphore() -> asyncio.Semaphore:
-    """Ek hi semaphore per event loop — concurrent Chrome count ka cap."""
+    """One semaphore per event loop; this is the cap on concurrent browsers."""
     global _sem, _sem_loop
     loop = asyncio.get_running_loop()
     if _sem is None or _sem_loop is not loop:
-        _sem = asyncio.Semaphore(_int_env("HEADLESS_MAX_CONCURRENT", 4))
+        _sem = asyncio.Semaphore(config.headless_max_concurrent())
         _sem_loop = loop
     return _sem
 
 
 async def render(url: str) -> str:
-    """URL ko browser me render karke final DOM lao."""
+    """Render a URL in the browser and return the resulting DOM."""
     exe = chrome_path()
     if not exe:
         raise BrowserNotAvailableError(
-            "Chrome ya Edge nahi mila. Install kijiye, ya CHROME_PATH env var me "
-            "uska poora path dijiye.")
+            "Neither Chrome nor Edge was found. Install one, or set CHROME_PATH "
+            "to its full path.")
 
-    wait_ms = _int_env("HEADLESS_WAIT_MS", 6000)
-    timeout = _int_env("HEADLESS_TIMEOUT_SEC", 45)
+    wait_ms = config.headless_wait_ms()
+    timeout = config.headless_timeout_sec()
 
     async with _semaphore():
-        # Har run apni profile directory me — warna user ka khula hua Chrome
-        # aur ye ek doosre se takraate hain.
-        profile = tempfile.mkdtemp(prefix="posttime-chrome-")
+        # Each run gets its own profile directory, otherwise this collides with
+        # any Chrome the operator already has open.
+        profile = tempfile.mkdtemp(prefix="postverify-chrome-")
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -145,18 +140,18 @@ async def render(url: str) -> str:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             if proc and proc.returncode is None:
                 proc.kill()
                 await proc.wait()
             raise RenderTimeoutError(
-                f"Page {timeout}s me render nahi hua") from e
+                f"The page did not render within {timeout}s") from e
         except OSError as e:
-            raise BrowserError(f"Browser chal nahi paya: {e}") from e
+            raise BrowserError(f"The browser failed to start: {e}") from e
         finally:
             shutil.rmtree(profile, ignore_errors=True)
 
     dom = out.decode("utf-8", errors="replace")
     if not dom.strip():
-        raise BrowserError("Browser ne khali page return kiya")
+        raise BrowserError("The browser returned an empty page")
     return dom

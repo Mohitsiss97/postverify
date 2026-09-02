@@ -1,18 +1,18 @@
-"""Do images compare karna: kya ye wahi image hai?
+"""Comparing two images: is this the same image?
 
-Sawaal ye nahi hai ki "dono files same hain kya" — sawaal ye hai ki "kya ye image
-us post me maujood hai". Size, compression, crop, watermark — in sab se farq nahi
-padna chahiye. Isliye teen level pe dekha jaata hai, sasta se mehenga:
+The question is not "are these two files identical" but "is this image present
+in that post". Size, compression, cropping and watermarking must not change the
+answer. So the comparison runs at three levels, cheapest first:
 
-    1. SHA-256      bilkul wahi file? (turant, 100% pakka)
-    2. pHash        dikhne me wahi? (resize/compress ke baad bhi same rehta hai)
-    3. ORB + RANSAC crop/watermark/rotate ke baad bhi wahi? (asli kaam yahan hota hai)
+    1. SHA-256      byte-for-byte the same file? (instant, certain)
+    2. pHash        visually the same? (survives resizing and recompression)
+    3. ORB + RANSAC still the same after cropping, watermarking or rotation?
 
-ORB keypoints dhoondta hai (corners, texture), unhe match karta hai, aur phir
-RANSAC se check karta hai ki matches ek hi geometric transform follow karte hain
-ya bas random shor hain. Yahi random matches se bachata hai — do bilkul alag
-images me bhi kuch keypoints ittefaqan match ho jaate hain, par wo ek consistent
-transform nahi banate.
+The third level does the real work. ORB finds keypoints (corners, texture),
+matches them, and RANSAC then checks whether those matches all follow a single
+geometric transform or are merely noise. That check is what prevents false
+positives: even two completely unrelated images share a few coincidental
+keypoint matches, but those matches never agree on one transform.
 """
 from __future__ import annotations
 
@@ -22,59 +22,62 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-# Bade images ko chhota kar dete hain — ORB ko itni detail chahiye hi nahi,
-# aur speed kai guna badh jaati hai.
+# Large images are scaled down. ORB does not need that much detail, and the
+# speed-up is several-fold.
 _WORK_SIZE = 900
 _PHASH_SIZE = 32
 _ORB_FEATURES = 3000
 _LOWE_RATIO = 0.75
 
-# Ye thresholds 7 asli images ke 20 variants pe calibrate kiye gaye hain.
+# These thresholds were calibrated on 20 variants each of 7 real images.
 #
-# Sabse kaam ki cheez jo calibration me nikli: asli match ko inlier *count* se
-# nahi, inlier *ratio* se pehchana jaata hai. Jab image sach me wahi hai to
-# lagbhag saare good matches ek hi homography follow karte hain (ratio 0.87-1.00).
-# Do alag images me kuch keypoints ittefaqan match ho jaate hain, par wo kisi
-# ek transform pe agree nahi karte (ratio 0.33-0.50). Beech me saaf khaayi hai.
-_PHASH_SAME = 8            # isse kam = dikhne me wahi image (alag images: 28+)
-_MIN_INLIER_RATIO = 0.65   # asli match: 0.87+, shor: 0.50 se neeche
-_INLIERS_STRONG = 25       # itne consistent matches + ratio = pakka wahi image
-_INLIERS_WEAK = 12         # itne = shayad wahi (chhote sample ke fluke se bachne ko)
+# The most valuable finding from that calibration: a genuine match is
+# identified by the inlier *ratio*, not the inlier *count*. When the image
+# really is the same, nearly every good match follows one homography (ratio
+# 0.87-1.00). Two different images do produce a few coincidental keypoint
+# matches, but those never agree on a single transform (ratio 0.33-0.50).
+# There is a clean gap between the two populations.
+_PHASH_SAME = 8            # below this, visually the same image (different: 28+)
+_MIN_INLIER_RATIO = 0.65   # genuine match: 0.87+, noise: below 0.50
+_INLIERS_STRONG = 25       # this many consistent matches, plus ratio, is conclusive
+_INLIERS_WEAK = 12         # this many is suggestive; guards against small-sample flukes
 
 
 class ImageError(ValueError):
-    """Image decode hi nahi hui."""
+    """The image could not be decoded."""
 
 
 @dataclass
 class Comparison:
     verdict: str                    # identical | same | likely | different
-    score: int                      # 0-100, kitna milta hai
+    score: int                      # 0-100 similarity indicator
     confidence: float               # 0..1
     exact: bool
     phash_distance: int | None
     orb_inliers: int
     orb_good_matches: int
-    coverage: float | None          # uploaded image post-image ka kitna hissa hai
+    coverage: float | None          # how much of the post image the upload covers
     note: str = ""
     _debug: dict = field(default_factory=dict, repr=False)
 
     @property
     def present(self) -> bool:
-        """Kya ye image post me hai — yehi asli jawab hai."""
+        """Whether the image is present in the post — the question that matters."""
         return self.verdict in ("identical", "same", "likely")
 
 
 # --- decoding -----------------------------------------------------------
 
 def decode(data: bytes) -> np.ndarray:
-    """Bytes se grayscale image. Koi bhi format jo OpenCV padh sakta hai."""
+    """Decode bytes to a grayscale image, in any format OpenCV can read."""
     if not data:
-        raise ImageError("Image khali hai")
+        raise ImageError("The image is empty")
     buf = np.frombuffer(data, dtype=np.uint8)
     img = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        raise ImageError("Ye image decode nahi hui — format support nahi ya file kharab hai")
+        raise ImageError(
+            "This image could not be decoded — the format is unsupported or the "
+            "file is corrupt")
     return img
 
 
@@ -96,11 +99,12 @@ def sha256(data: bytes) -> str:
 # --- level 2: perceptual hash -------------------------------------------
 
 def phash(img: np.ndarray) -> int:
-    """DCT-based perceptual hash. Resize/compress se nahi badalta."""
+    """DCT-based perceptual hash; unchanged by resizing and recompression."""
     small = cv2.resize(img, (_PHASH_SIZE, _PHASH_SIZE), interpolation=cv2.INTER_AREA)
     freq = cv2.dct(np.float32(small))
     block = freq[:8, :8].flatten()
-    # DC component (bilkul pehla) chhod do — wo sirf overall brightness hai
+    # Skip the DC component (the very first value); it only carries overall
+    # brightness.
     median = np.median(block[1:])
     bits = block > median
     value = 0
@@ -116,7 +120,7 @@ def hamming(a: int, b: int) -> int:
 # --- level 3: feature matching ------------------------------------------
 
 def _orb_match(a: np.ndarray, b: np.ndarray) -> tuple[int, int, float | None]:
-    """(inliers, good_matches, coverage) — coverage matlab a, b ka kitna hissa hai."""
+    """Return (inliers, good_matches, coverage), where coverage is a's share of b."""
     orb = cv2.ORB_create(nfeatures=_ORB_FEATURES)
     kp_a, des_a = orb.detectAndCompute(a, None)
     kp_b, des_b = orb.detectAndCompute(b, None)
@@ -126,8 +130,8 @@ def _orb_match(a: np.ndarray, b: np.ndarray) -> tuple[int, int, float | None]:
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
     pairs = matcher.knnMatch(des_a, des_b, k=2)
 
-    # Lowe ratio test — best match doosre se saaf behtar hona chahiye,
-    # warna wo match bharosemand nahi hai.
+    # Lowe's ratio test: the best match must be clearly better than the second
+    # best, otherwise it is not trustworthy.
     good = [m for m, n in (p for p in pairs if len(p) == 2)
             if m.distance < _LOWE_RATIO * n.distance]
     if len(good) < 8:
@@ -141,8 +145,8 @@ def _orb_match(a: np.ndarray, b: np.ndarray) -> tuple[int, int, float | None]:
 
     inliers = int(mask.sum())
 
-    # Homography degenerate to nahi? (sab points ek line pe aa gaye ho to
-    # inliers zyada dikhenge par matlab kuch nahi)
+    # Reject a degenerate homography: if every point collapsed onto one line the
+    # inlier count looks high but means nothing.
     if abs(np.linalg.det(matrix[:2, :2])) < 1e-6:
         return 0, len(good), None
 
@@ -151,7 +155,7 @@ def _orb_match(a: np.ndarray, b: np.ndarray) -> tuple[int, int, float | None]:
 
 
 def _coverage(shape_a: tuple, shape_b: tuple, matrix: np.ndarray) -> float | None:
-    """Image a ko b pe project karo — b ka kitna hissa cover hota hai."""
+    """Project image a onto b and report how much of b it covers."""
     h, w = shape_a[:2]
     corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
     try:
@@ -166,37 +170,39 @@ def _coverage(shape_a: tuple, shape_b: tuple, matrix: np.ndarray) -> float | Non
 
 
 def similarity_score(distance: int, inliers: int, good: int, ratio: float) -> int:
-    """0-100 ka score — user ko dikhane ke liye.
+    """A 0-100 similarity indicator, intended for display.
 
-    Do raaste hain aur jo zyada bole wahi liya jaata hai:
+    Two routes are computed and the higher one wins:
 
-      pHash se  : poori image kitni milti hai. distance 0 = 100, 32+ = 0.
-                  Crop pe ye gir jaata hai chahe image wahi ho.
-      ORB se    : geometry kitni milti hai. Ye tabhi ginta hai jab matches ek hi
-                  transform pe agree karein (ratio threshold ke upar) — warna 0.
-                  Confirm ho jaye to 55 se shuru hota hai, kyunki geometric
-                  confirmation apne aap me majboot sabooot hai.
+      From pHash : how closely the whole image matches. Distance 0 gives 100,
+                   32 or more gives 0. This collapses under cropping even when
+                   the image is the same.
+      From ORB   : how closely the geometry matches. This only counts when the
+                   matches agree on a single transform (above the ratio
+                   threshold); otherwise it is 0. Once confirmed it starts at
+                   55, because geometric confirmation is strong evidence in
+                   its own right.
 
-    Score ek *indicator* hai, faisla nahi. Faisla verdict karta hai.
+    The score is an *indicator*, not the decision. The verdict is the decision.
     """
     from_phash = max(0.0, 1 - distance / 32)
 
     from_orb = 0.0
     if good and ratio >= _MIN_INLIER_RATIO:
-        strength = min(inliers / 60, 1.0)                                  # kitne matches
+        strength = min(inliers / 60, 1.0)                                  # how many
         quality = min((ratio - _MIN_INLIER_RATIO) / (1 - _MIN_INLIER_RATIO), 1.0)
         from_orb = 0.55 + 0.45 * (0.6 * strength + 0.4 * quality)
 
     return int(round(100 * max(from_phash, from_orb)))
 
 
-# --- sab milakar --------------------------------------------------------
+# --- the three levels combined ------------------------------------------
 
 def compare(uploaded: bytes, candidate: bytes) -> Comparison:
-    """Uploaded image aur post ki ek image — kya ye wahi hai?"""
+    """Compare an uploaded image against one image from the post."""
     if sha256(uploaded) == sha256(candidate):
         return Comparison("identical", 100, 1.0, True, 0, 0, 0, 1.0,
-                          "Bilkul wahi file — ek byte bhi alag nahi")
+                          "Byte-for-byte the same file")
 
     img_a = _fit(decode(uploaded))
     img_b = _fit(decode(candidate))
@@ -209,11 +215,11 @@ def compare(uploaded: bytes, candidate: bytes) -> Comparison:
     debug = {"phash": distance, "inliers": inliers, "good": good,
              "ratio": round(ratio, 3), "coverage": coverage, "score": score}
 
-    # pHash poori image ko dekhta hai — crop pe fail ho jaata hai, par jab wo
-    # haan kehta hai to bahut bharosemand hota hai.
+    # pHash looks at the whole image, so it fails under cropping — but when it
+    # does say yes, it is highly reliable.
     if distance <= _PHASH_SAME:
         return Comparison("same", score, 0.97, False, distance, inliers, good, coverage,
-                          "Wahi image hai — sirf resize ya compress hui hai", debug)
+                          "The same image, only resized or recompressed", debug)
 
     if inliers >= _INLIERS_STRONG and ratio >= _MIN_INLIER_RATIO:
         return Comparison("same", score, min(0.95, 0.6 + inliers / 200), False, distance,
@@ -222,17 +228,18 @@ def compare(uploaded: bytes, candidate: bytes) -> Comparison:
     if inliers >= _INLIERS_WEAK and ratio >= _MIN_INLIER_RATIO:
         return Comparison("likely", score, 0.55 + inliers / 200, False, distance,
                           inliers, good, coverage,
-                          "Kaafi hissa milta hai, par pakka nahi — khud dekh lijiye", debug)
+                          "A substantial part matches, but not conclusively — "
+                          "review manually", debug)
 
     return Comparison("different", score, 0.0, False, distance, inliers, good, coverage,
-                      "Ye image is post me nahi mili", debug)
+                      "This image was not found in the post", debug)
 
 
 def _shape_note(coverage: float | None) -> str:
     if coverage is None:
-        return "Wahi image hai"
+        return "The same image"
     if coverage < 0.55:
-        return "Wahi image hai — aapki image post waali ka crop lagti hai"
+        return "The same image — the upload appears to be a crop of the post image"
     if coverage > 1.8:
-        return "Wahi image hai — post waali aapki image ka crop lagti hai"
-    return "Wahi image hai — edit ya compress hui ho sakti hai"
+        return "The same image — the post image appears to be a crop of the upload"
+    return "The same image — possibly edited or recompressed"

@@ -1,9 +1,14 @@
 """Test setup.
 
-Do baatein zaroori hain:
-  * env yahan, sabse upar set hota hai — app.config ek hi baar padhta hai
-  * koi test asli engine ko call nahi karta; sab FakeEngine se chalte hain,
-    warna tests network aur 15-second renders pe latak jaate
+Three things matter here:
+  * the environment is set at the very top, because app.config reads it once
+  * no test calls the real engine; they all run against FakeEngine, otherwise
+    the suite would depend on the network and on 15-second renders
+  * rate limiting is off for the suite as a whole. The middleware keeps its
+    counters on the application object, which is module-level, so the counts
+    would carry across tests and the suite would start failing once it grew past
+    the per-minute limit — a failure that would depend on test count rather than
+    on behaviour. The rate limiter has its own tests, which enable it explicitly.
 """
 from __future__ import annotations
 
@@ -14,10 +19,11 @@ from datetime import datetime, timedelta, timezone
 _TMP = tempfile.mkdtemp(prefix="portal-tests-")
 os.environ.update(
     DATABASE_URL="sqlite+aiosqlite:///:memory:",
-    WORKER_ENABLED="false",          # worker tests khud chalate hain
+    WORKER_ENABLED="false",          # the worker tests drive the loop themselves
     STORAGE_DIR=_TMP,
     ENGINE_URL="http://engine.invalid",
-    ADMIN_TOKEN="",                  # admin endpoints khule (dev jaisa)
+    ADMIN_TOKEN="",                  # admin endpoints open, as in development
+    RATE_LIMIT_PER_MINUTE="0",
     LOG_LEVEL="WARNING",
 )
 
@@ -36,11 +42,10 @@ ADMIN_HEADERS: dict[str, str] = {}
 # ---------------- fake engine ----------------
 
 class FakeEngine:
-    """Asli engine ki jagah — jo bhi chahiye wahi lautata hai.
+    """Stands in for the real engine and returns whatever a test needs.
 
-    `calls` me har call jaati hai, taaki test ye bhi jaanch sake ki kitni baar
-    call hui (har call asal me ek 15-second render hoti hai — count maayne
-    rakhta hai).
+    Every call is appended to `calls`, so a test can also assert how many were
+    made. Each call is a 15-second render in reality, so the count matters.
     """
 
     def __init__(self):
@@ -48,19 +53,20 @@ class FakeEngine:
         self.results: list[EngineResult | EngineError] = []
         self.default: EngineResult | EngineError | None = None
 
-    def queue(self, *items: EngineResult | EngineError) -> "FakeEngine":
+    def queue(self, *items: EngineResult | EngineError) -> FakeEngine:
         self.results.extend(items)
         return self
 
-    def always(self, item: EngineResult | EngineError) -> "FakeEngine":
+    def always(self, item: EngineResult | EngineError) -> FakeEngine:
         self.default = item
         return self
 
-    async def verify(self, post_url: str, image: bytes, *, filename: str = "a.jpg"):
+    async def verify(self, post_url: str, image: bytes, *, filename: str = "a.jpg",
+                     request_id: str | None = None):
         self.calls.append((post_url, image))
         item = self.results.pop(0) if self.results else self.default
         if item is None:
-            raise AssertionError("FakeEngine ke paas lautane ko kuch nahi hai")
+            raise AssertionError("FakeEngine has nothing left to return")
         if isinstance(item, EngineError):
             raise item
         return item
@@ -72,15 +78,15 @@ class FakeEngine:
         return None
 
 
-#: `published_at=None` ka matlab "engine ko time mila hi nahi" hona chahiye,
-#: isliye "diya hi nahi" ke liye alag sentinel chahiye.
+#: `published_at=None` has to mean "the engine found no time at all", so
+#: "the caller did not specify one" needs a separate sentinel.
 _DEFAULT = object()
 
 
 def engine_result(*, platform="instagram", post_id="ABC123",
                   age_hours: float = 2, present=True, verdict="identical",
                   score=100, published_at=_DEFAULT) -> EngineResult:
-    """Ek typical engine jawab — jitna chahiye utna badal lijiye."""
+    """A typical engine response; override whatever the test cares about."""
     if published_at is _DEFAULT:
         published_at = datetime.now(timezone.utc) - timedelta(hours=age_hours)
     return EngineResult(
@@ -101,14 +107,14 @@ def engine_result(*, platform="instagram", post_id="ABC123",
 
 
 def engine_down() -> EngineError:
-    return EngineError(RejectReason.ENGINE_UNAVAILABLE, "engine so raha hai")
+    return EngineError(RejectReason.ENGINE_UNAVAILABLE, "the engine is asleep")
 
 
 # ---------------- fixtures ----------------
 
 @pytest.fixture(autouse=True)
 async def fresh_db():
-    """Har test ko saaf DB — purane test ka data agle me na aaye."""
+    """A clean database per test, so no test inherits another's data."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -119,8 +125,8 @@ async def fresh_db():
 
 @pytest.fixture()
 def client():
-    # lifespan yahan nahi chalate — worker off rakhna hai aur tables fixture
-    # pehle hi bana chuka hai.
+    # The lifespan is not run here: the worker must stay off, and the fixture
+    # above has already created the tables.
     return TestClient(app)
 
 

@@ -1,8 +1,8 @@
-"""Shared dependencies — user pehchan, admin guard, aur ek jaisa error shape.
+"""Shared dependencies: user identity, the admin guard, and one error shape.
 
-Auth abhi nahi hai. Par user ki pehchan aur admin ka guard **ek hi jagah** se
-aate hain, to jab JWT lagana ho tab sirf ye do function badalne padenge —
-routers ko haath nahi lagana padega.
+There is no authentication yet. But user identity and the admin guard both come
+from **one place**, so introducing JWT later means changing these two functions
+and nothing in the routers.
 """
 from __future__ import annotations
 
@@ -14,36 +14,37 @@ from .config import settings
 
 
 def http_error(code: int, error: str, message: str, **extra) -> HTTPException:
-    """Poore portal me errors ka ek hi shape: {"error": ..., "message": ...}"""
+    """One error shape across the whole portal: {"error": ..., "message": ...}"""
     return HTTPException(code, {"error": error, "message": message, **extra})
 
 
 def not_found(what: str) -> HTTPException:
-    return http_error(status.HTTP_404_NOT_FOUND, "not_found", f"{what} nahi mila")
+    return http_error(status.HTTP_404_NOT_FOUND, "not_found", f"{what} was not found")
 
 
 async def current_user(x_user_id: str | None = Header(None)) -> str:
-    """Abhi user header se aata hai.
+    """For now the user is identified by a header.
 
-    JWT lagane pe sirf yahi function badlega — token decode karke wahi user id
-    return kar dena, baaki poora portal waise ka waisa chalega.
+    Introducing JWT changes only this function: decode the token and return the
+    same user ID, and the rest of the portal is unaffected.
     """
     if not x_user_id or not x_user_id.strip():
         raise http_error(
             status.HTTP_401_UNAUTHORIZED, "no_user",
-            f"{settings.user_header} header dena zaroori hai")
+            f"The {settings.user_header} header is required")
     return x_user_id.strip()
 
 
 async def require_admin(x_admin_token: str | None = Header(None)) -> None:
-    """ADMIN_TOKEN set ho to admin endpoints uske bina nahi chalenge.
+    """When ADMIN_TOKEN is set, the admin endpoints require it.
 
-    Set na ho to khule hain — dev ke liye theek, par production me zaroor set
-    kijiye: yahan se campaigns bante hain aur submissions override hoti hain.
+    When it is unset they are open, which is fine for development. In production
+    it must be set: these endpoints create campaigns and override submission
+    decisions.
     """
     expected = settings.admin_token
     if not expected:
         return
     if not x_admin_token or not secrets.compare_digest(x_admin_token, expected):
         raise http_error(status.HTTP_401_UNAUTHORIZED, "unauthorized",
-                         "Admin token chahiye (X-Admin-Token header)")
+                         "An admin token is required (X-Admin-Token header)")

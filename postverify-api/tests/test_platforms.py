@@ -1,4 +1,4 @@
-"""URL auto-detection, time extraction, aur media picking."""
+"""URL auto-detection, timestamp extraction and media selection."""
 from datetime import datetime, timezone
 
 import pytest
@@ -13,7 +13,6 @@ from app.platforms.linkedin import pick_media as li_media
 from app.platforms.x import pick_media as x_media
 from app.snowflake import x_created_at
 
-
 # ---------------- auto-detection ----------------
 
 @pytest.mark.parametrize("url,platform,pid", [
@@ -22,7 +21,8 @@ from app.snowflake import x_created_at
     ("x.com/a_b/status/123456789012345678", "x", "123456789012345678"),
     ("https://www.instagram.com/p/DceLPdrCR3L/", "instagram", "DceLPdrCR3L"),
     ("https://www.instagram.com/reel/DcmQE56lLTI/", "instagram", "DcmQE56lLTI"),
-    ("https://www.facebook.com/NASA/posts/1615702003258503", "facebook", "1615702003258503"),
+    ("https://www.facebook.com/NASA/posts/1615702003258503",
+     "facebook", "1615702003258503"),
     ("https://www.facebook.com/reel/1766270574681470/", "facebook", "1766270574681470"),
     ("https://www.facebook.com/watch/?v=1766270574681470", "facebook", "1766270574681470"),
     ("https://www.youtube.com/watch?v=jNQXAC9IVRw", "youtube", "jNQXAC9IVRw"),
@@ -34,12 +34,13 @@ from app.snowflake import x_created_at
      "linkedin", "7100000000000000000"),
 ])
 def test_url_alone_picks_the_platform(url, platform, pid):
-    """User ko kuch chunna nahi padta — URL hi kaafi hai."""
+    """The caller chooses nothing; the URL alone is enough."""
     p, m = reg.detect(url)
     assert (p.id, m.post_id) == (platform, pid)
 
 
-@pytest.mark.parametrize("url", ["", "   ", "https://example.com/x", "https://x.com/NASA", "junk"])
+@pytest.mark.parametrize("url", ["", "   ", "https://example.com/x",
+                                 "https://x.com/NASA", "junk"])
 def test_unknown_urls_rejected(url):
     with pytest.raises(UnsupportedURLError):
         reg.detect(url)
@@ -104,7 +105,7 @@ IG_DOM = (
 
 
 def test_instagram_time_is_the_first_one():
-    """Pehla <time> post ka, baaki comments ke."""
+    """The first <time> belongs to the post; the rest belong to comments."""
     assert ig_time(IG_DOM) == datetime(2026, 8, 25, 17, 29, 13, tzinfo=timezone.utc)
 
 
@@ -142,7 +143,7 @@ def test_facebook_time_from_embedded_json():
 
 
 def test_facebook_refuses_when_post_id_missing():
-    with pytest.raises(PlatformError, match="mila hi nahi"):
+    with pytest.raises(PlatformError, match="was not present"):
         fb_time('{"post_id":"999","creation_time":1788012882}', "1615702003258503")
 
 
@@ -179,5 +180,5 @@ def test_linkedin_skips_favicon():
 
 
 def test_snowflake_anchor_still_holds():
-    """Real anchor — agar ye toota to maths galat hai."""
+    """A real-world anchor: if this breaks, the arithmetic is wrong."""
     assert x_created_at(1026872652290379776).year == 2018

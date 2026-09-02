@@ -1,8 +1,8 @@
-"""Comparison engine — wahi image pehchano, alag image reject karo.
+"""The comparison engine: recognise the same image, reject a different one.
 
-Ye tests wahi variants use karte hain jinpe thresholds calibrate kiye gaye the:
-resize, compress, crop, rotate, watermark. Images synthetic hain par texture-rich,
-taaki ORB ko keypoints milein — real photos jaisa hi behave karti hain.
+These tests use the same variants the thresholds were calibrated on: resizing,
+recompression, cropping, rotation and watermarking. The images are synthetic but
+texture-rich, so ORB finds keypoints in them and they behave like real photos.
 """
 import cv2
 import numpy as np
@@ -12,7 +12,7 @@ from app.compare import ImageError, compare, decode, hamming, phash, sha256
 
 
 def make_image(seed: int, size: int = 640) -> np.ndarray:
-    """Texture-wali deterministic image — shapes + noise."""
+    """A deterministic, texture-rich image: shapes over noise."""
     rng = np.random.default_rng(seed)
     img = rng.integers(60, 190, (size, size), dtype=np.uint8)
     for _ in range(40):
@@ -42,7 +42,7 @@ def base_bytes(base):
     return jpg(base)
 
 
-# ---------------- wahi image pehchano ----------------
+# ---------------- recognise the same image ----------------
 
 def test_identical_file(base_bytes):
     r = compare(base_bytes, base_bytes)
@@ -51,7 +51,7 @@ def test_identical_file(base_bytes):
 
 
 def test_recompressed(base, base_bytes):
-    """Wahi image, dobara save ki hui — file alag, image wahi."""
+    """The same image saved again: a different file, the same picture."""
     r = compare(jpg(base, quality=35), base_bytes)
     assert r.present and not r.exact
     assert r.verdict == "same"
@@ -66,13 +66,13 @@ def test_resized(base, base_bytes, factor):
 
 @pytest.mark.parametrize("keep", [0.6, 0.45, 0.3])
 def test_cropped(base, base_bytes, keep):
-    """Crop pe pHash fail ho jaata hai — yahan ORB kaam karta hai."""
+    """pHash fails under cropping; this is where ORB does the work."""
     h, w = base.shape
     m = (1 - keep) / 2
     crop = base[int(h * m):int(h * (1 - m)), int(w * m):int(w * (1 - m))]
     r = compare(jpg(crop), base_bytes)
-    assert r.present, f"keep={keep} miss ho gaya: {r._debug}"
-    assert r.phash_distance > 8, "crop pe pHash ko fail hona chahiye tha"
+    assert r.present, f"keep={keep} was missed: {r._debug}"
+    assert r.phash_distance > 8, "pHash was expected to fail on a crop"
     assert r.orb_inliers >= 12
 
 
@@ -95,19 +95,19 @@ def test_brightened(base, base_bytes):
 
 
 def test_screenshot_with_padding(base, base_bytes):
-    """Screenshot me post ke aas-paas ka UI bhi aa jaata hai."""
+    """A screenshot also captures the interface around the post."""
     h, w = base.shape
     canvas = np.full((int(h * 1.4), w), 28, dtype=np.uint8)
     canvas[int(h * .2):int(h * .2) + h, :] = base
     assert compare(jpg(canvas), base_bytes).present
 
 
-# ---------------- alag image reject karo ----------------
+# ---------------- reject a different image ----------------
 
 @pytest.mark.parametrize("seed", [12, 13, 14, 15, 16])
 def test_different_images_rejected(base_bytes, seed):
     r = compare(jpg(make_image(seed)), base_bytes)
-    assert not r.present, f"seed={seed} galti se match ho gaya: {r._debug}"
+    assert not r.present, f"seed={seed} matched by mistake: {r._debug}"
     assert r.verdict == "different"
 
 
@@ -117,7 +117,7 @@ def test_blank_image_rejected(base_bytes):
 
 
 def test_flip_is_not_the_same_image(base, base_bytes):
-    """Mirror image ko "wahi" nahi maanna chahiye — wo alag image hai."""
+    """A mirrored image is a different image and must not count as the same."""
     assert not compare(jpg(cv2.flip(base, 1)), base_bytes).present
 
 
@@ -139,7 +139,7 @@ def test_sha256_changes_with_one_byte(base_bytes):
 
 def test_decode_rejects_junk():
     with pytest.raises(ImageError):
-        decode(b"ye image nahi hai")
+        decode(b"this is not an image")
 
 
 def test_decode_rejects_empty():
@@ -152,7 +152,7 @@ def test_coverage_hints_at_crop(base, base_bytes):
     crop = base[int(h * .25):int(h * .75), int(w * .25):int(w * .75)]
     r = compare(jpg(crop), base_bytes)
     assert r.present and r.coverage is not None
-    assert r.coverage < 0.8, "crop ka coverage 1 se kaafi kam hona chahiye"
+    assert r.coverage < 0.8, "a crop should cover well under the whole image"
 
 
 # ---------------- percentage score ----------------
@@ -162,23 +162,24 @@ def test_identical_scores_100(base_bytes):
 
 
 def test_score_high_for_real_matches(base, base_bytes):
-    """Har asli match 70 se upar hona chahiye (calibration: min 74)."""
+    """Every genuine match should score above 70 (calibration minimum: 74)."""
     h, w = base.shape
     variants = {
         "resize": cv2.resize(base, (w // 3, h // 3)),
         "crop": base[int(h * .2):int(h * .8), int(w * .2):int(w * .8)],
-        "rotate": cv2.warpAffine(base, cv2.getRotationMatrix2D((w / 2, h / 2), 10, 1.0), (w, h)),
+        "rotate": cv2.warpAffine(
+            base, cv2.getRotationMatrix2D((w / 2, h / 2), 10, 1.0), (w, h)),
     }
     for name, img in variants.items():
         s = compare(jpg(img), base_bytes).score
-        assert s >= 70, f"{name} ka score sirf {s} aaya"
+        assert s >= 70, f"{name} only scored {s}"
 
 
 def test_score_low_for_different_images(base_bytes):
-    """Alag images 40 se neeche rehni chahiye (calibration: max 25)."""
+    """Different images should stay below 40 (calibration maximum: 25)."""
     for seed in (41, 42, 43, 44):
         s = compare(jpg(make_image(seed)), base_bytes).score
-        assert s < 40, f"seed={seed} ka score {s} — bahut zyada hai"
+        assert s < 40, f"seed={seed} scored {s}, which is far too high"
 
 
 def test_score_never_out_of_range(base, base_bytes):

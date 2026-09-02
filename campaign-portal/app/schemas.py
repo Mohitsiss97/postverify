@@ -1,7 +1,8 @@
-"""Request aur response shapes.
+"""Request and response shapes.
 
-API ka contract yahi hai — models.py andar ka dhaancha hai, ye bahar ka.
-Dono alag isliye ki DB badalne pe API na toote.
+This is the API contract. models.py is the internal structure; this is the
+external one. They are kept separate so that a change to the database does not
+break the API.
 """
 from __future__ import annotations
 
@@ -24,9 +25,9 @@ class CampaignCreate(BaseModel):
     title: str = Field(..., min_length=3, max_length=200)
     description: str | None = None
     window_hours: int = Field(24, ge=1, le=24 * 90,
-                              description="Post itne ghante se purani na ho")
+                              description="A post may be at most this many hours old")
     allowed_platforms: list[str] | None = Field(
-        None, description="Khali chhodo to sab platforms allowed")
+        None, description="Leave empty to allow every platform")
     starts_at: datetime | None = None
     ends_at: datetime | None = None
 
@@ -39,8 +40,8 @@ class CampaignCreate(BaseModel):
         unknown = [p for p in cleaned if p not in PLATFORMS]
         if unknown:
             raise ValueError(
-                f"Ye platforms support nahi hain: {', '.join(unknown)}. "
-                f"Valid: {', '.join(PLATFORMS)}")
+                f"These platforms are not supported: {', '.join(unknown)}. "
+                f"Valid platforms: {', '.join(PLATFORMS)}")
         return cleaned or None
 
 
@@ -100,11 +101,12 @@ class SubmissionCreate(BaseModel):
     post_url: str = Field(..., min_length=8, max_length=1000,
                           examples=["https://www.instagram.com/p/XXXXXXXX/"])
     platform: str = Field(..., examples=["instagram"],
-                          description="User ne kis platform pe post kiya")
+                          description="The platform the participant posted on")
     asset_id: int | None = Field(
-        None, description="Kaunsa creative post kiya. Bata doge to verification "
-                          "ek hi engine call me ho jayega — warna campaign ke "
-                          "creatives ek-ek karke try honge (har ek ek call).")
+        None, description="Which creative was posted. Supplying it means "
+                          "verification takes a single engine call; without it "
+                          "the campaign's creatives are tried one at a time, "
+                          "and each attempt is another call.")
 
     @field_validator("platform")
     @classmethod
@@ -112,7 +114,8 @@ class SubmissionCreate(BaseModel):
         cleaned = value.strip().lower()
         if cleaned not in PLATFORMS:
             raise ValueError(
-                f"'{value}' support nahi hai. Valid: {', '.join(PLATFORMS)}")
+                f"'{value}' is not supported. Valid platforms: "
+                f"{', '.join(PLATFORMS)}")
         return cleaned
 
     @field_validator("post_url")
@@ -120,7 +123,7 @@ class SubmissionCreate(BaseModel):
     def looks_like_url(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned.lower().startswith(("http://", "https://")):
-            raise ValueError("Post ka poora URL daaliye (https:// se shuru)")
+            raise ValueError("Enter the full post URL, starting with https://")
         return cleaned
 
 
@@ -172,14 +175,14 @@ class RecordOut(ORMModel):
 
 
 class SubmissionDetail(SubmissionOut):
-    """Poora byora — audit ke liye har attempt ka record bhi."""
+    """The full account, including the record of every attempt, for auditing."""
     records: list[RecordOut] = []
 
 
 class ManualDecision(BaseModel):
     approve: bool
     note: str = Field(..., min_length=3, max_length=500,
-                      description="Kyun — ye record me jaata hai")
+                      description="The reason for the decision; it is recorded")
 
 
 class Page(BaseModel):

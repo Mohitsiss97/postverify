@@ -1,27 +1,36 @@
-"""Data model.
+"""The data model.
 
-Paanch tables:
-    campaigns          admin jo campaign banata hai
-    campaign_assets    us campaign ki images (jo user download karke post karega)
-    enrollments        kaun sa user kis campaign me hai
-    submissions        user ne apne post ka link diya — iska status yahan
-    verification_records  har verification attempt ka poora record (audit trail)
+Five tables:
+    campaigns             the campaigns an administrator creates
+    campaign_assets       their creatives, which participants download and post
+    enrollments           which participant is in which campaign
+    submissions           a participant's post link, and its outcome
+    verification_records  the full record of every verification attempt
 
-Submission aur verification_record alag isliye hain: submission user ko dikhne
-wali cheez hai (ek status), aur record har koshish ka saboot hai. Retry hone pe
-submission ek hi rehti hai, records badhte jaate hain.
+Submission and verification_record are separate on purpose. The submission is
+what the participant sees — one row with one status. A record is the evidence of
+one attempt. Across retries the submission stays a single row while the records
+accumulate.
 """
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (JSON, Boolean, CheckConstraint, Float, ForeignKey,
-                        Index, Integer, String, Text, UniqueConstraint)
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base, timestamp_column, utcnow
-from .enums import (CampaignStatus, EnrollmentStatus, RejectReason,
-                    SubmissionStatus)
+from .enums import CampaignStatus, EnrollmentStatus, SubmissionStatus
 
 
 class Campaign(Base):
@@ -33,10 +42,11 @@ class Campaign(Base):
     status: Mapped[str] = mapped_column(String(20), default=CampaignStatus.DRAFT,
                                         index=True)
 
-    # Har campaign apna window rakh sakti hai; default settings se aata hai.
+    # Each campaign may set its own window; the default comes from settings.
     window_hours: Mapped[int] = mapped_column(Integer, default=24)
 
-    # Khali = sab platforms chalte hain. Warna comma separated: "instagram,x"
+    # Empty means every platform is allowed. Otherwise comma-separated:
+    # "instagram,x"
     allowed_platforms: Mapped[str | None] = mapped_column(String(200), default=None)
 
     starts_at: Mapped[datetime | None] = timestamp_column(default=None)
@@ -44,10 +54,10 @@ class Campaign(Base):
     created_at: Mapped[datetime] = timestamp_column(default=utcnow)
     updated_at: Mapped[datetime] = timestamp_column(default=utcnow, onupdate=utcnow)
 
-    assets: Mapped[list["CampaignAsset"]] = relationship(
+    assets: Mapped[list[CampaignAsset]] = relationship(
         back_populates="campaign", cascade="all, delete-orphan",
         order_by="CampaignAsset.id")
-    enrollments: Mapped[list["Enrollment"]] = relationship(
+    enrollments: Mapped[list[Enrollment]] = relationship(
         back_populates="campaign", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -62,7 +72,8 @@ class Campaign(Base):
 
 
 class CampaignAsset(Base):
-    """Ek creative — jo image user download karke apne account pe post karega."""
+    """One creative: the image a participant downloads and posts to their own
+    account."""
 
     __tablename__ = "campaign_assets"
 
@@ -80,7 +91,8 @@ class CampaignAsset(Base):
     campaign: Mapped[Campaign] = relationship(back_populates="assets")
 
     __table_args__ = (
-        # Ek hi image do baar add na ho — galti se duplicate creative banane se bachav
+        # The same image cannot be added twice, which guards against creating a
+        # duplicate creative by accident.
         UniqueConstraint("campaign_id", "sha256", name="uq_asset_per_campaign"),
     )
 
@@ -92,8 +104,8 @@ class Enrollment(Base):
     campaign_id: Mapped[int] = mapped_column(
         ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
 
-    # Abhi ye header se aata hai. JWT lagane pe sirf isko bharne ka tareeka
-    # badlega, baaki kuch nahi.
+    # For now this comes from a header. Introducing JWT changes only how this
+    # column is populated, and nothing else.
     user_ref: Mapped[str] = mapped_column(String(200), index=True)
 
     status: Mapped[str] = mapped_column(String(20), default=EnrollmentStatus.ACTIVE,
@@ -102,7 +114,7 @@ class Enrollment(Base):
     completed_at: Mapped[datetime | None] = timestamp_column(default=None)
 
     campaign: Mapped[Campaign] = relationship(back_populates="enrollments")
-    submissions: Mapped[list["Submission"]] = relationship(
+    submissions: Mapped[list[Submission]] = relationship(
         back_populates="enrollment", cascade="all, delete-orphan",
         order_by="Submission.id")
 
@@ -112,7 +124,7 @@ class Enrollment(Base):
 
 
 class Submission(Base):
-    """User ne apne post ka link diya. Verification ka nateeja yahin dikhta hai."""
+    """A participant's post link, and the outcome of verifying it."""
 
     __tablename__ = "submissions"
 
@@ -125,9 +137,9 @@ class Submission(Base):
     post_url: Mapped[str] = mapped_column(String(1000))
     declared_platform: Mapped[str] = mapped_column(String(30))
 
-    # User bata sakta hai ki kaunsa creative post kiya. Na bataye to hum
-    # campaign ke creatives ek-ek karke try karte hain (mehenga — har try ek
-    # engine call hai), isliye max_assets_to_try se capped.
+    # The participant may state which creative they posted. If they do not, the
+    # campaign's creatives are tried one by one. That is expensive — each
+    # attempt is a separate engine call — so it is capped by max_assets_to_try.
     asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("campaign_assets.id", ondelete="SET NULL"), default=None)
 
@@ -136,7 +148,7 @@ class Submission(Base):
     reason: Mapped[str | None] = mapped_column(String(40), default=None)
     message: Mapped[str | None] = mapped_column(Text, default=None)
 
-    # Engine ne URL se jo pehchana
+    # What the engine resolved from the URL
     resolved_platform: Mapped[str | None] = mapped_column(String(30), default=None)
     post_id: Mapped[str | None] = mapped_column(String(200), default=None)
     canonical_url: Mapped[str | None] = mapped_column(String(1000), default=None)
@@ -149,10 +161,11 @@ class Submission(Base):
     image_score: Mapped[int | None] = mapped_column(Integer, default=None)
     image_verdict: Mapped[str | None] = mapped_column(String(20), default=None)
 
-    # Ek post duniya me ek hi baar gin'i jaye. Ye key sirf tab set hoti hai jab
-    # submission zinda ho (pending/verifying/approved); reject hone pe NULL kar
-    # dete hain taaki wahi post koi aur — ya wahi user sudhaar ke — bhej sake.
-    # NULL values unique index me collide nahi karti, isliye ye portable hai.
+    # A given post counts exactly once. This key is only set while the
+    # submission is live (pending, verifying or approved); on rejection it is set
+    # back to NULL so that the same post can be submitted again — by someone
+    # else, or by the same participant after fixing the problem. NULLs do not
+    # collide in a unique index, which makes this portable across databases.
     dedupe_key: Mapped[str | None] = mapped_column(String(250), default=None)
 
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -164,13 +177,13 @@ class Submission(Base):
     verified_at: Mapped[datetime | None] = timestamp_column(default=None)
 
     enrollment: Mapped[Enrollment] = relationship(back_populates="submissions")
-    records: Mapped[list["VerificationRecord"]] = relationship(
+    records: Mapped[list[VerificationRecord]] = relationship(
         back_populates="submission", cascade="all, delete-orphan",
         order_by="VerificationRecord.attempt")
 
     __table_args__ = (
         UniqueConstraint("dedupe_key", name="uq_live_post"),
-        # Worker isi pe queue uthata hai
+        # The index the worker reads the queue on
         Index("ix_submission_queue", "status", "next_attempt_at"),
     )
 
@@ -180,13 +193,15 @@ class Submission(Base):
 
 
 class VerificationRecord(Base):
-    """Ek verification attempt ka poora saboot.
+    """The full evidence for one verification attempt.
 
-    Ye audit trail hai: baad me koi kahe "mera to sahi tha", to yahan se dikhaya
-    ja sakta hai ki kis waqt, kaunsi image se, kya nateeja aaya tha.
+    This is the audit trail. When a participant later disputes an outcome, it
+    shows exactly when the check ran, which image it compared against, and what
+    the result was.
 
-    Asset ka sha256 yahan copy hota hai — agar admin baad me creative badal de,
-    tab bhi record batata hai ki us waqt kis image se compare hua tha.
+    The asset's SHA-256 is copied here deliberately: if an administrator later
+    replaces the creative, the record still says which image was actually used
+    at the time.
     """
 
     __tablename__ = "verification_records"
@@ -196,7 +211,7 @@ class VerificationRecord(Base):
         ForeignKey("submissions.id", ondelete="CASCADE"), index=True)
     attempt: Mapped[int] = mapped_column(Integer)
 
-    outcome: Mapped[str] = mapped_column(String(20))          # approved|rejected|error
+    outcome: Mapped[str] = mapped_column(String(20))   # approved | rejected | error
     reason: Mapped[str | None] = mapped_column(String(40), default=None)
 
     checked_asset_id: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -212,7 +227,8 @@ class VerificationRecord(Base):
     image_score: Mapped[int | None] = mapped_column(Integer, default=None)
     image_present: Mapped[bool | None] = mapped_column(Boolean, default=None)
 
-    # Engine ka poora jawab — jo bhi hum store karna bhool gaye wo yahan hai
+    # The engine's complete response: whatever the columns above do not
+    # capture is still here.
     engine_response: Mapped[dict | None] = mapped_column(JSON, default=None)
     engine_status: Mapped[int | None] = mapped_column(Integer, default=None)
     duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)

@@ -1,4 +1,4 @@
-"""Window parsing — "1d, 3d, 7d, 1m" jaisi cheezein."""
+"""Window parsing: strings like "1d, 3d, 7d, 1m"."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -25,8 +25,8 @@ def test_units(text, seconds):
 
 
 def test_m_means_month_not_minute():
-    """Bahut parsers me m = minute hota hai. Yahan jaan-boojh kar month hai —
-    sawaal hi "1 month" waala tha. Minute ke liye min."""
+    """Many parsers read m as minute. Here it deliberately means month,
+    because the requirement was "1 month". Minutes are written as min."""
     assert parse_one("1m").seconds == 30 * 86_400
     assert parse_one("1min").seconds == 60
 
@@ -75,14 +75,14 @@ def test_duplicates_dropped():
 
 def test_too_many_refused():
     many = ",".join(f"{i}d" for i in range(1, MAX_WINDOWS + 3))
-    with pytest.raises(WindowError, match="zyada"):
+    with pytest.raises(WindowError, match="No more than"):
         parse(many)
 
 
 def test_one_bad_entry_fails_the_whole_thing():
-    """Aadha jawab dene se behtar hai saaf mana kar dena."""
+    """Refusing outright is better than answering half the question."""
     with pytest.raises(WindowError):
-        parse("1d,kachra,7d")
+        parse("1d,nonsense,7d")
 
 
 # ---------------- evaluate ----------------
@@ -102,7 +102,7 @@ def test_old_post_is_within_nothing():
 
 
 def test_the_interesting_middle():
-    """5 din purana: 1d nahi, 7d haan, 1m haan."""
+    """Five days old: outside 1d, inside 7d, inside 1m."""
     got = evaluate(parse("1d,3d,7d,1m"), _ago(days=5))
     assert got["results"] == {"1d": False, "3d": False, "7d": True, "1m": True}
 
@@ -118,7 +118,7 @@ def test_just_past_boundary():
 
 
 def test_future_timestamp_counts_as_within():
-    """Clock skew se timestamp thoda future ka aa sakta hai — usse bahar nahi maanenge."""
+    """Clock skew can put a timestamp slightly in the future; that still counts."""
     got = evaluate(parse("1d"), datetime.now(timezone.utc) + timedelta(minutes=5))
     assert got["results"]["1d"] is True
 

@@ -1,7 +1,8 @@
-"""Database setup — async engine aur session.
+"""Database setup: the async engine and session factory.
 
-Async isliye ki app khud async hai aur har verification me engine ko HTTP call
-jaati hai. Sync driver use karte to wo call event loop ko block karti.
+Async throughout, because the application is async and every verification makes
+an HTTP call to the engine. A synchronous driver would block the event loop for
+the whole duration of that call.
 """
 from __future__ import annotations
 
@@ -9,15 +10,15 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, MetaData, TypeDecorator, event
-from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
-                                    create_async_engine)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, mapped_column
 from sqlalchemy.pool import StaticPool
 
 from .config import settings
 
-# Constraint names tay hone se Alembic migrations saaf rehti hain — warna
-# har DB apne naam banata hai aur baad me drop/alter karna mushkil ho jaata.
+# Fixing the constraint naming keeps Alembic migrations clean. Without it each
+# database invents its own names, and dropping or altering a constraint later
+# becomes guesswork.
 NAMING = {
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -36,12 +37,12 @@ def utcnow() -> datetime:
 
 
 class UtcDateTime(TypeDecorator):
-    """Har timestamp UTC me jaata hai aur UTC me hi wapas aata hai.
+    """Every timestamp is stored as UTC and comes back as UTC.
 
-    Iski zaroorat isliye hai ki SQLite timezone rakhta hi nahi — wo naive
-    datetime lautata hai, jabki Postgres aware. Bina iske code dev me chal
-    jaata hai aur prod me `can't compare offset-naive and offset-aware`
-    pe girta hai (ya ulta). Ye dono ko ek jaisa bana deta hai.
+    This exists because SQLite does not store timezones at all and returns naive
+    datetimes, while PostgreSQL returns aware ones. Without it the code works in
+    development and fails in production with "can't compare offset-naive and
+    offset-aware datetimes", or the reverse. This makes both behave alike.
     """
 
     impl = DateTime(timezone=True)
@@ -51,7 +52,7 @@ class UtcDateTime(TypeDecorator):
         if value is None:
             return None
         if value.tzinfo is None:
-            # Naive aaya to UTC maan lo — poore code me hum UTC hi likhte hain
+            # A naive value is assumed to be UTC; this codebase only writes UTC.
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
@@ -70,8 +71,8 @@ def timestamp_column(**kwargs):
 def _make_engine(url: str):
     kwargs: dict = {"echo": settings.db_echo, "future": True}
     if url.startswith("sqlite"):
-        # SQLite ke sath: file lock ke liye ek hi connection, aur in-memory
-        # (tests) me har session ko wahi connection milna chahiye.
+        # SQLite specifics: a single connection because of file locking, and
+        # for an in-memory database (tests) every session must share it.
         kwargs["connect_args"] = {"check_same_thread": False}
         if ":memory:" in url:
             kwargs["poolclass"] = StaticPool
@@ -87,10 +88,10 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False,
 
 @event.listens_for(engine.sync_engine, "connect")
 def _sqlite_pragmas(dbapi_connection, _record):
-    """SQLite ko theek se chalane ke liye — WAL aur foreign keys.
+    """The settings SQLite needs to behave correctly: WAL and foreign keys.
 
-    Foreign keys SQLite me default OFF hoti hain; bina iske cascade aur
-    referential integrity chup-chaap kaam nahi karte.
+    Foreign keys are OFF by default in SQLite, so without this both cascades and
+    referential integrity fail silently.
     """
     if not settings.database_url.startswith("sqlite"):
         return
@@ -102,13 +103,13 @@ def _sqlite_pragmas(dbapi_connection, _record):
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency — request ke saath session khulta aur band hota hai."""
+    """FastAPI dependency: a session opened and closed with the request."""
     async with SessionLocal() as session:
         yield session
 
 
 async def create_all() -> None:
-    """Sirf dev/test ke liye. Production me Alembic migrations chalti hain."""
-    from . import models  # noqa: F401  — models import hone chahiye tables ke liye
+    """Development and tests only. Production schema changes go through Alembic."""
+    from . import models  # noqa: F401  — the import is what registers the tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

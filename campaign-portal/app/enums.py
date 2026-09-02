@@ -1,8 +1,8 @@
-"""Statuses aur reject reasons.
+"""Statuses and rejection reasons.
 
-Reason codes hi wo cheez hain jo user ko dikhti hai, isliye inhe ek jagah rakha
-hai — API, DB, aur user-facing message teeno yahin se aate hain. Nayi wajah
-add karni ho to sirf yahan.
+The reason codes are what the participant actually sees, so they are kept in one
+place: the API, the database and the user-facing message all come from here.
+A new reason is added here and nowhere else.
 """
 from __future__ import annotations
 
@@ -10,27 +10,31 @@ from enum import StrEnum
 
 
 class CampaignStatus(StrEnum):
-    DRAFT = "draft"          # ban rahi hai, users ko nahi dikhti
-    ACTIVE = "active"        # chalu — enroll aur submit ho sakta hai
-    CLOSED = "closed"        # band — naye submissions nahi
+    DRAFT = "draft"          # being prepared; not visible to participants
+    ACTIVE = "active"        # running; enrolment and submission are open
+    CLOSED = "closed"        # finished; no new submissions accepted
 
 
 class EnrollmentStatus(StrEnum):
     ACTIVE = "active"
-    COMPLETED = "completed"  # ek submission approve ho gaya
+    COMPLETED = "completed"  # one submission has been approved
     CANCELLED = "cancelled"
 
 
 class SubmissionStatus(StrEnum):
-    PENDING = "pending"      # queue me, worker uthayega
-    VERIFYING = "verifying"  # worker abhi kaam kar raha hai
-    APPROVED = "approved"    # saare checks pass
-    REJECTED = "rejected"    # koi rule fail — final, retry nahi hoga
-    ERROR = "error"          # takneeki dikkat — retries khatam ho gaye
+    PENDING = "pending"      # queued, waiting for a worker
+    VERIFYING = "verifying"  # a worker is processing it now
+    APPROVED = "approved"    # every check passed
+    REJECTED = "rejected"    # a rule failed; final, never retried
+    ERROR = "error"          # a technical failure that exhausted its retries
 
 
 class RejectReason(StrEnum):
-    """Kyun reject hua. `ERROR_*` waale takneeki hain, baaki business rules."""
+    """Why a submission was rejected.
+
+    Most of these are business rules and are final. ENGINE_UNAVAILABLE and
+    TIME_NOT_AVAILABLE are technical and are retried; see RETRYABLE below.
+    """
 
     TOO_OLD = "too_old"
     IMAGE_MISMATCH = "image_mismatch"
@@ -46,43 +50,44 @@ class RejectReason(StrEnum):
     ENGINE_UNAVAILABLE = "engine_unavailable"
 
 
-# User ko yahi dikhega. Saaf bhaasha, ilzaam nahi — aur jahan ho sake wahan
-# agla kadam bhi bata do.
+# What the participant is shown. Plain language, no accusation, and wherever
+# possible the next step they can take.
 REASON_MESSAGES: dict[RejectReason, str] = {
     RejectReason.TOO_OLD:
-        "Ye post {age} purani hai. Post {window} ghante ke andar ki honi chahiye — "
-        "dobara post karke naya link daaliye.",
+        "This post is {age} old. Posts must be published within {window} hours — "
+        "post it again and submit the new link.",
     RejectReason.IMAGE_MISMATCH:
-        "Post me jo image hai wo campaign waali image se match nahi hui. "
-        "Check kijiye ki aapne wahi image post ki hai jo yahan se download ki thi.",
+        "The image in the post does not match the campaign creative. Please check "
+        "that you posted the same image you downloaded here.",
     RejectReason.WRONG_PLATFORM:
-        "Aapne {declared} chuna tha par ye link {actual} ka hai. "
-        "Sahi platform chunkar dobara submit kijiye.",
+        "You selected {declared}, but this link is a {actual} link. "
+        "Select the correct platform and submit again.",
     RejectReason.DUPLICATE:
-        "Ye post pehle hi submit ho chuki hai. Har post ek hi baar gin'i jaati hai.",
+        "This post has already been submitted. Each post counts only once.",
     RejectReason.POST_NOT_FOUND:
-        "Post khul nahi rahi — ho sakta hai wo private ho ya delete ho gayi ho. "
-        "Post public kijiye aur dobara try kijiye.",
+        "The post could not be opened — it may be private or deleted. "
+        "Make the post public and try again.",
     RejectReason.NO_IMAGE_IN_POST:
-        "Is post me koi image nahi mili. Campaign ki image ke saath post kijiye.",
+        "No image was found in this post. Please post the campaign image with it.",
     RejectReason.UNSUPPORTED_URL:
-        "Ye link kisi supported platform ka nahi lagta. "
-        "Post ka poora URL daaliye (Instagram, Facebook, X, LinkedIn ya YouTube).",
+        "This does not look like a link from a supported platform. Paste the full "
+        "post URL from Instagram, Facebook, X, LinkedIn or YouTube.",
     RejectReason.TIME_NOT_AVAILABLE:
-        "Post ka upload time nahi mil paya, isliye {window} ghante waala check "
-        "nahi ho saka. Thodi der baad dobara try kijiye.",
+        "The post's upload time could not be read, so the {window}-hour check "
+        "could not be completed. Please try again shortly.",
     RejectReason.NO_CAMPAIGN_ASSETS:
-        "Is campaign me abhi koi image nahi hai. Admin se sampark kijiye.",
+        "This campaign has no creative yet. Please contact the administrator.",
     RejectReason.CAMPAIGN_CLOSED:
-        "Ye campaign band ho chuki hai, naye submissions nahi liye ja rahe.",
+        "This campaign has closed and is no longer accepting submissions.",
     RejectReason.MANUAL_REJECT:
-        "Ye submission review me reject ki gayi hai.",
+        "This submission was rejected during review.",
     RejectReason.ENGINE_UNAVAILABLE:
-        "Verification service abhi jawab nahi de rahi. Aapka submission surakshit "
-        "hai — thodi der baad dobara check kiya jayega.",
+        "The verification service is not responding. Your submission is safe and "
+        "will be checked again shortly.",
 }
 
-# In wajahon pe dobara koshish ka matlab hai (takneeki dikkat), baaki final hain.
+# Retrying only makes sense for a technical failure. Everything else is a
+# judgement that will not change on a second attempt.
 RETRYABLE: frozenset[RejectReason] = frozenset({
     RejectReason.ENGINE_UNAVAILABLE,
     RejectReason.TIME_NOT_AVAILABLE,
@@ -94,6 +99,6 @@ def message_for(reason: RejectReason, **context: object) -> str:
     try:
         return template.format(**context)
     except KeyError:
-        # Context adhoora ho to message aadha-adhoora dikhane se behtar hai
-        # ki placeholder ke bina hi de do.
+        # Incomplete context: better to show the template without its
+        # placeholders filled than a half-rendered message or an exception.
         return template

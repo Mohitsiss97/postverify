@@ -1,9 +1,9 @@
-"""URL se time nikalna, aur image ko post se milana.
+"""Reading a post's publish time from its URL, and matching an image against it.
 
-Ye API-only service hai, isliye yahan koi session, koi temp folder, koi
-`/media` route nahi hai. Post ki images sirf **memory me** aati hain, compare
-hoti hain, aur request khatam hote hi chali jaati hain — disk pe kuch likha hi
-nahi jaata, to mitane ko bhi kuch nahi bachta.
+This is an API-only service, so it has no sessions, no temporary directories
+and no `/media` route. Images from the post are held **in memory only**: they
+are downloaded, compared, and discarded when the request ends. Nothing is
+written to disk, so there is nothing to clean up afterwards.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from . import platforms as reg
 from .compare import Comparison, compare, decode
 from .platforms import ImageRef, PlatformError
 
-# Ek post pe itni se zyada images check nahi karte — bachav.
+# Upper bound on how many images from one post are examined.
 MAX_IMAGES = 12
 _DOWNLOAD_CONCURRENCY = 6
 _RANK = {"identical": 3, "same": 2, "likely": 1, "different": 0}
@@ -25,7 +25,7 @@ _RANK = {"identical": 3, "same": 2, "likely": 1, "different": 0}
 
 @dataclass
 class PostTime:
-    published_at: datetime          # hamesha UTC
+    published_at: datetime          # always UTC
     published_at_local: str | None
     timezone: str | None
     age_seconds: int
@@ -75,12 +75,13 @@ class Result:
 
 def _age_human(seconds: int) -> str:
     if seconds < 0:
-        return "future me (clock skew?)"
-    for name, size in (("saal", 31_536_000), ("mahine", 2_592_000), ("din", 86_400),
-                       ("ghante", 3600), ("minute", 60)):
+        return "in the future (clock skew?)"
+    for name, size in (("year", 31_536_000), ("month", 2_592_000), ("day", 86_400),
+                       ("hour", 3600), ("minute", 60)):
         if seconds >= size:
-            return f"{seconds // size} {name} purana"
-    return f"{seconds} second purana"
+            count = seconds // size
+            return f"{count} {name}{'s' if count != 1 else ''} old"
+    return f"{seconds} second{'s' if seconds != 1 else ''} old"
 
 
 def _build_time(timing, tz: str | None) -> PostTime:
@@ -91,7 +92,8 @@ def _build_time(timing, tz: str | None) -> PostTime:
             local = dt.astimezone(ZoneInfo(tz)).isoformat()
             tzname = tz
         except Exception:
-            local, tzname = None, None      # galat timezone se poora jawab na ruke
+            # An unknown timezone must not cost the caller the whole answer.
+            local, tzname = None, None
     age = int((datetime.now(timezone.utc) - dt).total_seconds())
     return PostTime(dt, local, tzname, age, _age_human(age),
                     timing.method, timing.precision)
@@ -100,7 +102,7 @@ def _build_time(timing, tz: str | None) -> PostTime:
 # --- images -------------------------------------------------------------
 
 def _collapse_groups(images: list[ImageRef]) -> list[list[ImageRef]]:
-    """Ek group = ek hi image ke alag resolutions; pehli jo download ho jaye wahi."""
+    """A group is one image at several resolutions; the first to download wins."""
     groups: list[list[ImageRef]] = []
     by_key: dict[str, list[ImageRef]] = {}
     for ref in images:
@@ -129,10 +131,10 @@ async def _compare_all(uploaded: bytes, groups: list[list[ImageRef]]) -> list[Ca
             ref, data = await _download_group(group)
         cand = Candidate(tier=ref.tier)
         if data is None:
-            cand.error = "download nahi hui"
+            cand.error = "download failed"
             return cand
         try:
-            # OpenCV blocking hai — event loop ko rokne se bachao
+            # OpenCV is blocking; keep it off the event loop.
             result: Comparison = await asyncio.to_thread(compare, uploaded, data)
         except Exception as e:
             cand.error = str(e)
@@ -147,25 +149,26 @@ async def _compare_all(uploaded: bytes, groups: list[list[ImageRef]]) -> list[Ca
     return list(await asyncio.gather(*(one(g) for g in groups)))
 
 
-# --- ek hi entry point --------------------------------------------------
+# --- the single entry point ---------------------------------------------
 
 async def resolve(url: str, *, tz: str | None = None,
                   uploaded: bytes | None = None) -> Result:
-    """Platform detect karo, time nikalo, aur image di ho to compare karo.
+    """Detect the platform, read the publish time, and compare an image if given.
 
-    Mehenga kaam (page render / fetch) sirf ek baar hota hai — time aur images
-    dono usi ek nateeje se nikalte hain.
+    The expensive step — rendering or fetching the page — happens exactly once;
+    both the timestamp and the images are derived from that single result.
 
-    Time aur image alag-alag chalte hain: ek fail ho to doosra rukta nahi.
-    Adhoora jawab poore na-jawab se behtar hai.
+    Time and image are evaluated independently, so a failure in one does not
+    stop the other. A partial answer is more useful than no answer.
     """
     platform, m = reg.detect(url)
     if platform.id not in {p.id for p in reg.enabled()}:
-        raise PlatformError(f"{platform.label} is deployment me enabled nahi hai",
+        raise PlatformError(f"{platform.label} is not enabled in this deployment",
                             platform=platform.id, reason="disabled")
 
     if uploaded is not None:
-        decode(uploaded)            # kharab upload pe turant fail, download se pehle
+        # Fail fast on a corrupt upload, before spending any download time.
+        decode(uploaded)
 
     result = Result(platform=platform.id, platform_label=platform.label,
                     post_id=m.post_id, canonical_url=m.canonical_url)
@@ -184,7 +187,7 @@ async def resolve(url: str, *, tz: str | None = None,
             cands = await _compare_all(uploaded, groups)
             usable = [c for c in cands if c.error is None]
             if not usable:
-                result.image_error = "post ki koi image download nahi ho payi"
+                result.image_error = "none of the post's images could be downloaded"
             else:
                 best = max(usable, key=lambda c: (c.rank, c.tier == "post", c.score))
                 result.image = ImageMatch(
@@ -198,10 +201,11 @@ async def resolve(url: str, *, tz: str | None = None,
             result.image_error = str(e)
             result._errors.append(e)
 
-    # Kuch bhi haath na aaya to asli exception hi wapas uthao, taaki uska reason
-    # (invalid_id, not_visible, ...) bana rahe — generic 502 me badal dena galat hoga.
+    # If nothing at all came back, re-raise the original exception so its reason
+    # (invalid_id, not_visible, ...) survives. Collapsing it into a generic 502
+    # would discard the only useful information the caller has.
     if result.time is None and result.image is None:
         raise result._errors[0] if result._errors else PlatformError(
-            "kuch nahi mila", platform=platform.id, reason="upstream_error")
+            "nothing could be resolved", platform=platform.id, reason="upstream_error")
 
     return result

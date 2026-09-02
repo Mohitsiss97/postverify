@@ -1,4 +1,4 @@
-name: tests
+name: ci
 
 on:
   push:
@@ -7,11 +7,14 @@ on:
 
 jobs:
   test:
+    name: ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service: [campaign-portal, postverify-api, postverify, posttime, imagematch]
+        # Only the two deployed services. reference/ holds superseded
+        # development work and is deliberately not built or tested.
+        service: [campaign-portal, postverify-api]
 
     steps:
       - uses: actions/checkout@v4
@@ -20,13 +23,19 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: ${{ matrix.service }}/requirements.txt
+          cache-dependency-path: ${{ matrix.service }}/requirements-dev.txt
 
       - name: Install
         working-directory: ${{ matrix.service }}
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
-      # Koi test browser ya network nahi chhoota — CI me Chrome ki zaroorat nahi.
+      - name: Lint
+        working-directory: ${{ matrix.service }}
+        run: ruff check app tests
+
+      # No test touches a browser or the network, so CI needs neither Chrome
+      # nor outbound access. If that ever stops being true, the suite has
+      # acquired a dependency it should not have.
       - name: Test
         working-directory: ${{ matrix.service }}
         run: pytest -q

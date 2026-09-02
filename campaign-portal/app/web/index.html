@@ -235,25 +235,25 @@
   <div class="top-in">
     <div class="brand"><i></i> Campaign Portal</div>
     <div class="who">
-      <label for="uid">Main hoon</label>
+      <label for="uid">Signed in as</label>
       <input id="uid" type="text" placeholder="ravi" autocomplete="off">
       <label for="atok" style="margin-left:6px">Admin token</label>
-      <input id="atok" type="text" placeholder="khali chalega" autocomplete="off">
+      <input id="atok" type="text" placeholder="optional" autocomplete="off">
     </div>
   </div>
 </header>
 
 <div class="shell">
   <aside class="rail">
-    <h3>Mera hissa</h3>
+    <h3>Participate</h3>
     <nav>
       <a data-go="campaigns">Campaigns</a>
-      <a data-go="mine">Meri submissions</a>
+      <a data-go="mine">My submissions</a>
     </nav>
-    <h3>Admin</h3>
+    <h3>Administration</h3>
     <nav>
-      <a data-go="manage">Campaigns manage</a>
-      <a data-go="review">Submissions review</a>
+      <a data-go="manage">Manage campaigns</a>
+      <a data-go="review">Review submissions</a>
     </nav>
   </aside>
   <main id="main"></main>
@@ -267,7 +267,9 @@ const $ = s => document.querySelector(s);
 const ES = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ES[c]);
 
-// ---------- pehchan (abhi auth nahi hai, isliye yahin se) ----------
+// ---------- identity ----------
+// There is no authentication yet, so identity is entered here and sent as a
+// header. When real auth arrives, only this block and the api() headers change.
 const store = {
   get user() { try { return localStorage.getItem("cp_user") || "ravi"; } catch { return "ravi"; } },
   set user(v) { try { localStorage.setItem("cp_user", v); } catch {} },
@@ -293,7 +295,7 @@ async function api(path, {method = "GET", body, form, admin = false} = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
 
   if (!r.ok) {
-    // Har error ek hi shape me aata hai: {"error", "message"}
+    // Every error arrives in one shape: {"error", "message"}
     const err = new Error((data && data.message) || `HTTP ${r.status}`);
     err.code = data && data.error;
     throw err;
@@ -304,28 +306,34 @@ async function api(path, {method = "GET", body, form, admin = false} = {}) {
 function toast(message, kind = "") {
   const el = document.createElement("div");
   el.className = "toast " + kind;
-  el.innerHTML = `<b>${kind === "bad" ? "Nahi ho paya" : kind === "ok" ? "Ho gaya" : "Suno"}</b>${esc(message)}`;
+  const heading = kind === "bad" ? "Could not do that"
+    : kind === "ok" ? "Done" : "Note";
+  // textContent, never innerHTML: this text can come from the server, and the
+  // page's content policy is only safe while nothing untrusted becomes markup.
+  const b = document.createElement("b");
+  b.textContent = heading;
+  el.append(b, document.createTextNode(message));
   $("#toasts").append(el);
   setTimeout(() => el.remove(), 5200);
 }
 
-// ---------- chhote helpers ----------
+// ---------- small helpers ----------
 const pill = (status) => `<span class="pill p-${esc(status)}"><i></i>${esc(status)}</span>`;
 const when = (iso) => iso ? new Date(iso).toLocaleString(undefined,
   {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "—";
 const REASON_LABEL = {
-  too_old: "Post window se purani",
-  image_mismatch: "Image match nahi hui",
-  wrong_platform: "Platform galat bataya",
-  duplicate: "Post pehle submit ho chuki",
-  post_not_found: "Post khuli hi nahi",
-  no_image_in_post: "Post me image nahi",
-  unsupported_url: "Link support nahi",
-  campaign_closed: "Campaign band",
-  manual_reject: "Admin ne reject kiya",
+  too_old: "Posted outside the window",
+  image_mismatch: "Image did not match",
+  wrong_platform: "Wrong platform selected",
+  duplicate: "Already submitted",
+  post_not_found: "Post could not be opened",
+  no_image_in_post: "No image in the post",
+  unsupported_url: "Link not supported",
+  campaign_closed: "Campaign closed",
+  manual_reject: "Rejected in review",
   engine_unavailable: "Verification service down",
-  time_not_available: "Post ka time nahi mila",
-  no_campaign_assets: "Campaign me image nahi",
+  time_not_available: "Post time unavailable",
+  no_campaign_assets: "Campaign has no image",
 };
 
 // ---------- routing ----------
@@ -360,22 +368,22 @@ async function render() {
   clearTimers();
   markRail();
   const main = $("#main");
-  main.innerHTML = `<p class="muted">Load ho raha hai…</p>`;
-  // Yahan `??` use karna galat tha: view chalti hai par undefined return karti
-  // hai, aur `undefined ?? notFound()` uske render ko mita deta hai.
+  main.innerHTML = `<p class="muted">Loading…</p>`;
+  // Using `??` here was a bug: the view runs but returns undefined, and
+  // `undefined ?? notFound()` then wipes out what it just rendered.
   const view = VIEWS[route.view];
   if (!view) { notFound(main); return; }
   try {
     await view(main, route.id);
   } catch (e) {
-    main.innerHTML = `<div class="card"><h1>Kuch atak gaya</h1>
+    main.innerHTML = `<div class="card"><h1>Something went wrong</h1>
       <p class="sub">${esc(e.message)}</p>
-      <button class="btn-2" onclick="location.reload()">Dobara koshish</button></div>`;
+      <button class="btn-2" onclick="location.reload()">Try again</button></div>`;
   }
 }
-const notFound = m => { m.innerHTML = `<div class="empty">Ye page nahi mila</div>`; };
+const notFound = m => { m.innerHTML = `<div class="empty">This page does not exist</div>`; };
 
-// ---------- VIEW: campaigns (user) ----------
+// ---------- VIEW: campaigns (participant) ----------
 const VIEWS = {};
 
 VIEWS.campaigns = async (main) => {
@@ -385,8 +393,8 @@ VIEWS.campaigns = async (main) => {
 
   main.innerHTML = `
     <h1>Campaigns</h1>
-    <p class="sub">Jis campaign me shaamil hona hai use kholiye, uski image download
-      kijiye, apne social account pe post kijiye — phir us post ka link yahin daaliye.</p>
+    <p class="sub">Open the campaign you want to join, download its image, post it
+      to your own social media account — then paste the link to that post here.</p>
     ${rows.length ? `<div class="grid g2">${rows.map(c => {
       const e = joined.get(c.id);
       return `<div class="card">
@@ -395,15 +403,15 @@ VIEWS.campaigns = async (main) => {
           ${e ? pill(e.status === "completed" ? "completed" : "active") : ""}
         </div>
         <p class="small muted" style="margin:7px 0 0">
-          ${esc(c.description || "Post ka window: " + c.window_hours + " ghante")}</p>
+          ${esc(c.description || "Posting window: " + c.window_hours + " hours")}</p>
         <div class="row" style="margin-top:14px">
           <button class="btn btn-sm" data-open="${c.id}">
-            ${e ? "Kholo" : "Shaamil ho"}</button>
-          <span class="faint small">${c.window_hours} ghante ka window</span>
+            ${e ? "Open" : "Join"}</button>
+          <span class="faint small">${c.window_hours}-hour window</span>
         </div>
       </div>`;
-    }).join("")}</div>` : `<div class="empty">Abhi koi campaign chalu nahi hai.<br>
-      <span class="small">Admin &rarr; Campaigns manage se ek banaiye.</span></div>`}`;
+    }).join("")}</div>` : `<div class="empty">No campaign is running yet.<br>
+      <span class="small">Create one under Administration &rarr; Manage campaigns.</span></div>`}`;
 
   main.querySelectorAll("[data-open]").forEach(b =>
     b.addEventListener("click", async () => {
@@ -415,7 +423,7 @@ VIEWS.campaigns = async (main) => {
     }));
 };
 
-// ---------- VIEW: ek campaign (user) ----------
+// ---------- VIEW: one campaign (participant) ----------
 VIEWS.campaign = async (main, id) => {
   const campaign = await api(`/v1/campaigns/${id}`);
   const enrollments = await api("/v1/enrollments");
@@ -426,18 +434,18 @@ VIEWS.campaign = async (main, id) => {
   const many = campaign.assets.length > 1;
 
   main.innerHTML = `
-    <button class="link" data-back>&larr; sab campaigns</button>
+    <button class="link" data-back>&larr; all campaigns</button>
     <h1 style="margin-top:10px">${esc(campaign.title)}</h1>
-    <p class="sub">Teen kadam: image download kijiye, apne account pe post kijiye,
-      phir us post ka link yahan daaliye.</p>
+    <p class="sub">Three steps: download the image, post it to your own account,
+      then paste the link to that post here.</p>
 
     <div class="step">
       <div class="n">1</div>
       <div>
-        <h4>Image download kijiye</h4>
+        <h4>Download the image</h4>
         <p class="hint">${many
-          ? "Jo image post karni hai use chuniye, phir download kijiye."
-          : "Yahi image aapko post karni hai."}</p>
+          ? "Choose the image you want to post, then download it."
+          : "This is the image to post."}</p>
         <div class="grid g3" id="assets">
           ${campaign.assets.map((a, i) => `
             <div class="shot pick ${i === 0 ? "sel" : ""}" data-asset="${a.id}"
@@ -448,30 +456,30 @@ VIEWS.campaign = async (main, id) => {
                 <span class="faint">${Math.round(a.size_bytes / 1024)} KB</span></span>
             </div>`).join("")}
         </div>
-        <a class="dl" id="dl" href="#" download>&#8595;&nbsp; Image download karo</a>
+        <a class="dl" id="dl" href="#" download>&#8595;&nbsp; Download image</a>
       </div>
     </div>
 
     <div class="step">
       <div class="n">2</div>
       <div>
-        <h4>Apne account pe post kijiye</h4>
-        <p class="hint">Downloaded image ko apne social account pe post kijiye.
-          Do baatein zaroori hain — <b>post public honi chahiye</b> (private post
-          hum khol hi nahi payenge), aur wo <b>${campaign.window_hours} ghante</b>
-          ke andar ki honi chahiye.</p>
+        <h4>Post it to your account</h4>
+        <p class="hint">Post the downloaded image to your own social media account.
+          Two things matter — the <b>post must be public</b> (we cannot open a
+          private post), and it must be published <b>within
+          ${campaign.window_hours} hours</b>.</p>
       </div>
     </div>
 
     <div class="step">
       <div class="n">3</div>
       <div>
-        <h4>Us post ka link yahan daaliye</h4>
+        <h4>Paste the link to that post here</h4>
         <p class="hint">${live
-          ? "Aapka ek submission abhi check ho raha hai — uska nateeja aane ke baad naya bhej sakte hain."
-          : "Post ka poora URL chahiye, profile ka nahi."}</p>
+          ? "One of your submissions is being checked — you can send another once that result is in."
+          : "We need the full URL of the post, not of your profile."}</p>
         <div class="field">
-          <label class="f" for="plat">Kis platform pe post kiya</label>
+          <label class="f" for="plat">Which platform you posted on</label>
           <select id="plat" ${live ? "disabled" : ""}>
             <option value="instagram">Instagram</option>
             <option value="facebook">Facebook</option>
@@ -481,15 +489,15 @@ VIEWS.campaign = async (main, id) => {
           </select>
         </div>
         <div class="field">
-          <label class="f" for="url">Post ka link</label>
+          <label class="f" for="url">Link to the post</label>
           <input id="url" type="url" placeholder="https://www.instagram.com/p/XXXXXXXX/"
                  ${live ? "disabled" : ""}>
         </div>
         <button class="btn" id="send" style="margin-top:14px" ${live ? "disabled" : ""}>
-          Submit karo</button>
+          Submit</button>
 
         <details class="howto">
-          <summary>Post ka link kaise nikalein?</summary>
+          <summary>How do I find the link to my post?</summary>
           <ol id="howsteps"></ol>
         </details>
       </div>
@@ -498,21 +506,21 @@ VIEWS.campaign = async (main, id) => {
     <div id="live"></div>
 
     ${subs.length ? `<h3 style="font-size:13px;margin:26px 0 10px" class="faint">
-      IS CAMPAIGN KI MERI SUBMISSIONS</h3>
+      MY SUBMISSIONS FOR THIS CAMPAIGN</h3>
       ${submissionTable(subs)}` : ""}`;
 
-  // link kaise nikalein — platform ke hisaab se badalta hai
+  // Finding the link differs per platform, so the steps follow the selection.
   const HOWTO = {
-    instagram: ["Apni post kholiye", "Upar daayin taraf ke tteen dot dabaiye",
-                "&ldquo;Link&rdquo; ya &ldquo;Copy link&rdquo; chuniye"],
-    facebook: ["Apni post kholiye", "Post ke upar teen dot dabaiye",
-               "&ldquo;Copy link&rdquo; chuniye"],
-    x: ["Apni post kholiye", "Neeche share ka icon dabaiye",
-        "&ldquo;Copy link&rdquo; chuniye"],
-    linkedin: ["Apni post kholiye", "Upar daayin taraf teen dot dabaiye",
-               "&ldquo;Copy link to post&rdquo; chuniye"],
-    youtube: ["Apna video kholiye", "&ldquo;Share&rdquo; dabaiye",
-              "Link copy kar lijiye"],
+    instagram: ["Open your post", "Tap the three dots at the top right",
+                "Choose &ldquo;Link&rdquo; or &ldquo;Copy link&rdquo;"],
+    facebook: ["Open your post", "Tap the three dots above the post",
+               "Choose &ldquo;Copy link&rdquo;"],
+    x: ["Open your post", "Tap the share icon below it",
+        "Choose &ldquo;Copy link&rdquo;"],
+    linkedin: ["Open your post", "Tap the three dots at the top right",
+               "Choose &ldquo;Copy link to post&rdquo;"],
+    youtube: ["Open your video", "Tap &ldquo;Share&rdquo;",
+              "Copy the link"],
   };
   const PLACEHOLDER = {
     instagram: "https://www.instagram.com/p/XXXXXXXX/",
@@ -530,7 +538,7 @@ VIEWS.campaign = async (main, id) => {
   main.querySelector("#plat").addEventListener("change", syncPlatform);
   syncPlatform();
 
-  // download button hamesha chune hue creative ka
+  // The download button always points at the selected creative.
   const syncDownload = () => {
     const sel = main.querySelector(".pick.sel");
     const dl = main.querySelector("#dl");
@@ -551,10 +559,10 @@ VIEWS.campaign = async (main, id) => {
 
   main.querySelector("#send")?.addEventListener("click", async () => {
     const url = main.querySelector("#url").value.trim();
-    if (!url) return toast("Post ka link daaliye", "bad");
+    if (!url) return toast("Paste the link to your post", "bad");
     const asset = main.querySelector(".pick.sel")?.dataset.asset;
     const btn = main.querySelector("#send");
-    btn.disabled = true; btn.textContent = "Bhej rahe hain…";
+    btn.disabled = true; btn.textContent = "Sending…";
     try {
       const created = await api("/v1/submissions", {method: "POST", body: {
         enrollment_id: enrollment.id,
@@ -567,7 +575,7 @@ VIEWS.campaign = async (main, id) => {
     } catch (e) {
       toast(e.message, "bad");
     } finally {
-      btn.disabled = false; btn.textContent = "Submit karo";
+      btn.disabled = false; btn.textContent = "Submit";
     }
   });
 };
@@ -582,7 +590,7 @@ async function watch(id, box) {
 
     box.innerHTML = resultCard(d, Date.now() - started);
     if (d.status === "pending" || d.status === "verifying") later(tick, 2000);
-    else if (d.status === "approved") toast("Aapka submission approve ho gaya", "ok");
+    else if (d.status === "approved") toast("Your submission was approved", "ok");
   };
   await tick();
 }
@@ -594,8 +602,8 @@ function resultCard(d, elapsedMs) {
   const icon = waiting ? "…" : ok ? "✓" : "!";
   const seconds = Math.round(elapsedMs / 1000);
 
-  const title = waiting ? "Check ho raha hai"
-    : ok ? "Sab sahi hai" : (REASON_LABEL[d.reason] || "Reject ho gaya");
+  const title = waiting ? "Checking"
+    : ok ? "Everything checks out" : (REASON_LABEL[d.reason] || "Rejected");
 
   return `<div class="card ${kind}" style="margin-top:14px">
     <div class="verdict ${kind}">
@@ -603,7 +611,7 @@ function resultCard(d, elapsedMs) {
       <div style="min-width:0">
         <h2>${esc(title)}</h2>
         <p>${esc(d.message || (waiting
-          ? "Post kholi ja rahi hai. Instagram aur Facebook pe 15-20 second lagte hain."
+          ? "Opening the post. Instagram and Facebook take 15-20 seconds."
           : ""))}</p>
       </div>
       <span style="margin-left:auto">${pill(d.status)}</span>
@@ -615,28 +623,28 @@ function resultCard(d, elapsedMs) {
         ${check(d.resolved_platform ? "pass" : "skip",
                 d.resolved_platform
                   ? `Platform: ${d.resolved_platform}` + (d.reason === "wrong_platform"
-                      ? ` — aapne ${d.declared_platform} bataya tha` : "")
-                  : "Platform pehchana nahi gaya",
+                      ? ` — you selected ${d.declared_platform}` : "")
+                  : "Platform not identified",
                 d.reason === "wrong_platform" ? "fail" : null)}
         ${check(d.within_window === true ? "pass" : d.within_window === false ? "fail" : "skip",
                 d.published_at
-                  ? `Post ka time: ${when(d.published_at)}`
-                  : "Post ka time nahi mila")}
+                  ? `Posted at ${when(d.published_at)}`
+                  : "Post time could not be read")}
         ${check(d.reason === "image_mismatch" ? "fail"
                 : d.image_verdict ? "pass" : "skip",
                 d.image_verdict
                   ? `Image: ${d.image_verdict} (${d.image_score}% match)`
-                  : "Image check nahi hua")}
+                  : "Image not checked")}
         ${d.reason === "duplicate"
-          ? check("fail", "Ye post pehle hi submit ho chuki hai") : ""}
+          ? check("fail", "This post has already been submitted") : ""}
       </div>
       <dl>
         <dt>Post</dt><dd>${d.canonical_url
           ? `<a href="${esc(d.canonical_url)}" target="_blank" rel="noopener">${esc(d.canonical_url)}</a>`
           : esc(d.post_url)}</dd>
-        <dt>Submit kiya</dt><dd>${when(d.created_at)}</dd>
-        ${d.verified_at ? `<dt>Check hua</dt><dd>${when(d.verified_at)}</dd>` : ""}
-        ${d.attempts > 1 ? `<dt>Koshishein</dt><dd>${d.attempts}</dd>` : ""}
+        <dt>Submitted</dt><dd>${when(d.created_at)}</dd>
+        ${d.verified_at ? `<dt>Checked</dt><dd>${when(d.verified_at)}</dd>` : ""}
+        ${d.attempts > 1 ? `<dt>Attempts</dt><dd>${d.attempts}</dd>` : ""}
       </dl>`}
   </div>`;
 }
@@ -647,13 +655,13 @@ function check(state, text, override) {
   return `<div class="chk ${s}"><b>${mark}</b><span>${esc(text)}</span></div>`;
 }
 
-// ---------- VIEW: meri submissions ----------
+// ---------- VIEW: my submissions ----------
 VIEWS.mine = async (main) => {
   const rows = await api("/v1/submissions");
   main.innerHTML = `
-    <h1>Meri submissions</h1>
-    <p class="sub">Aapke bheje hue saare links aur unka nateeja.</p>
-    ${rows.length ? submissionTable(rows, true) : `<div class="empty">Abhi kuch nahi bheja.</div>`}`;
+    <h1>My submissions</h1>
+    <p class="sub">Every link you have sent, and how each one turned out.</p>
+    ${rows.length ? submissionTable(rows, true) : `<div class="empty">Nothing submitted yet.</div>`}`;
   wireRows(main);
 };
 
@@ -661,7 +669,7 @@ function submissionTable(rows, showCampaign = false) {
   return `<div class="tw"><table>
     <thead><tr>
       ${showCampaign ? "<th>Campaign</th>" : ""}
-      <th>Post</th><th>Status</th><th>Wajah</th><th>Kab</th>
+      <th>Post</th><th>Status</th><th>Reason</th><th>When</th>
     </tr></thead>
     <tbody>${rows.map(s => `<tr class="clickable" data-sub="${s.id}">
       ${showCampaign ? `<td class="num">#${s.campaign_id}</td>` : ""}
@@ -680,7 +688,7 @@ function wireRows(scope) {
 
 VIEWS.submission = async (main, id) => {
   const d = await api(`/v1/submissions/${id}`);
-  main.innerHTML = `<button class="link" data-back>&larr; wapas</button>
+  main.innerHTML = `<button class="link" data-back>&larr; back</button>
     <h1 style="margin-top:10px">Submission #${d.id}</h1>
     <p class="sub">Campaign #${d.campaign_id}</p>
     <div id="live"></div>`;
@@ -688,23 +696,24 @@ VIEWS.submission = async (main, id) => {
   watch(d.id, main.querySelector("#live"));
 };
 
-// ---------- VIEW: admin campaigns ----------
+// ---------- VIEW: manage campaigns (admin) ----------
 VIEWS.manage = async (main) => {
   const rows = await api("/v1/campaigns");
   main.innerHTML = `
-    <h1>Campaigns manage</h1>
-    <p class="sub">Campaign banaiye, uski image add kijiye, phir activate.
-      Bina image ke activate nahi hoti — warna har submission reject hota.</p>
+    <h1>Manage campaigns</h1>
+    <p class="sub">Create a campaign, add its image, then activate it. A campaign
+      without an image cannot be activated — every submission to it would be
+      rejected.</p>
 
     <div class="card">
-      <label class="f">Nayi campaign</label>
+      <label class="f">New campaign</label>
       <div class="row" style="gap:10px;align-items:flex-end">
         <div style="flex:2 1 240px"><input id="ntitle" type="text" placeholder="Diwali Campaign"></div>
         <div style="flex:0 0 130px">
-          <label class="f" for="nwin">Window (ghante)</label>
+          <label class="f" for="nwin">Window (hours)</label>
           <input id="nwin" type="number" value="24" min="1" max="2160">
         </div>
-        <button class="btn" id="ncreate">Banao</button>
+        <button class="btn" id="ncreate">Create</button>
       </div>
     </div>
 
@@ -717,16 +726,16 @@ VIEWS.manage = async (main) => {
         <td>${pill(c.status)}</td>
         <td class="num">${c.window_hours}h</td>
         <td class="num" data-count="${c.id}">—</td>
-        <td><button class="btn-2 btn-sm" data-edit="${c.id}">Kholo</button></td>
+        <td><button class="btn-2 btn-sm" data-edit="${c.id}">Open</button></td>
       </tr>`).join("")}</tbody></table></div>` : ""}`;
 
   main.querySelector("#ncreate").addEventListener("click", async () => {
     const title = main.querySelector("#ntitle").value.trim();
-    if (title.length < 3) return toast("Title kam se kam 3 akshar ka ho", "bad");
+    if (title.length < 3) return toast("The title needs at least 3 characters", "bad");
     try {
       const c = await api("/v1/campaigns", {method: "POST", admin: true, body: {
         title, window_hours: Number(main.querySelector("#nwin").value) || 24}});
-      toast(`Campaign #${c.id} ban gayi — ab image add kijiye`, "ok");
+      toast(`Campaign #${c.id} created — now add an image`, "ok");
       go("edit", c.id);
     } catch (e) { toast(e.message, "bad"); }
   });
@@ -744,24 +753,24 @@ VIEWS.manage = async (main) => {
 VIEWS.edit = async (main, id) => {
   const c = await api(`/v1/campaigns/${id}`);
   main.innerHTML = `
-    <button class="link" data-back>&larr; sab campaigns</button>
+    <button class="link" data-back>&larr; all campaigns</button>
     <h1 style="margin-top:10px">${esc(c.title)}</h1>
-    <p class="sub">${pill(c.status)} &nbsp; window ${c.window_hours} ghante</p>
+    <p class="sub">${pill(c.status)} &nbsp; ${c.window_hours}-hour window</p>
 
     <div class="card">
       <div class="spread">
         <label class="f" style="margin:0">Creatives</label>
         <label class="btn btn-2 btn-sm" style="margin:0">
-          Image add karo<input id="up" type="file" accept="image/*" hidden></label>
+          Add image<input id="up" type="file" accept="image/*" hidden></label>
       </div>
       ${c.assets.length ? `<div class="grid g3" style="margin-top:13px">
         ${c.assets.map(a => `<div class="shot">
           <img src="/v1/campaigns/${c.id}/assets/${a.id}/file" alt="">
           <span class="meta"><span>${esc(a.filename)}</span>
-            <button class="link" data-del="${a.id}">hatao</button></span>
+            <button class="link" data-del="${a.id}">remove</button></span>
         </div>`).join("")}</div>`
-      : `<p class="small muted" style="margin:12px 0 0">Abhi koi image nahi.
-          Activate karne ke liye kam se kam ek chahiye.</p>`}
+      : `<p class="small muted" style="margin:12px 0 0">No image yet.
+          At least one is required before this can be activated.</p>`}
     </div>
 
     <div class="card">
@@ -782,7 +791,7 @@ VIEWS.edit = async (main, id) => {
     form.append("file", file);
     try {
       await api(`/v1/campaigns/${id}/assets`, {method: "POST", form, admin: true});
-      toast("Image add ho gayi", "ok");
+      toast("Image added", "ok");
       render();
     } catch (err) { toast(err.message, "bad"); }
   });
@@ -801,13 +810,13 @@ VIEWS.edit = async (main, id) => {
       try {
         await api(`/v1/campaigns/${id}`, {method: "PATCH", admin: true,
                                           body: {status: b.dataset.status}});
-        toast(`Campaign ab ${b.dataset.status} hai`, "ok");
+        toast(`Campaign is now ${b.dataset.status}`, "ok");
         render();
       } catch (e) { toast(e.message, "bad"); }
     }));
 };
 
-// ---------- VIEW: admin review ----------
+// ---------- VIEW: review submissions (admin) ----------
 VIEWS.review = async (main) => {
   const [rows, stats] = await Promise.all([
     api("/v1/admin/submissions?limit=100"),
@@ -817,9 +826,9 @@ VIEWS.review = async (main) => {
   const reasons = stats.by_reject_reason || {};
 
   main.innerHTML = `
-    <h1>Submissions review</h1>
-    <p class="sub">Sab users ke submissions. Kisi row pe click karke poora audit
-      trail dekh sakte hain — har koshish ka record.</p>
+    <h1>Review submissions</h1>
+    <p class="sub">Submissions from every participant. Click a row to see the full
+      audit trail — the record of every attempt.</p>
 
     <div class="grid g2" style="margin-bottom:16px">
       <div class="card">
@@ -830,19 +839,19 @@ VIEWS.review = async (main) => {
         </div>
       </div>
       <div class="card">
-        <label class="f">Reject ki wajah</label>
+        <label class="f">Rejection reasons</label>
         <div class="row" style="gap:8px;margin-top:4px">
           ${Object.keys(reasons).length
             ? Object.entries(reasons).map(([r, n]) =>
                 `<span class="pill p-rejected"><i></i>${esc(REASON_LABEL[r] || r)} ${n}</span>`).join("")
-            : `<span class="faint small">abhi koi nahi</span>`}
+            : `<span class="faint small">none so far</span>`}
         </div>
       </div>
     </div>
 
     ${rows.length ? `<div class="tw"><table>
       <thead><tr><th>#</th><th>Campaign</th><th>Post</th><th>Status</th>
-        <th>Wajah</th><th>Score</th><th>Kab</th></tr></thead>
+        <th>Reason</th><th>Score</th><th>When</th></tr></thead>
       <tbody>${rows.map(s => `<tr class="clickable" data-rev="${s.id}">
         <td class="num">${s.id}</td>
         <td class="num">#${s.campaign_id}</td>
@@ -853,7 +862,7 @@ VIEWS.review = async (main) => {
         <td class="num small">${s.image_score == null ? "—" : s.image_score + "%"}</td>
         <td class="num small muted">${when(s.created_at)}</td>
       </tr>`).join("")}</tbody></table></div>`
-    : `<div class="empty">Abhi koi submission nahi aaya.</div>`}`;
+    : `<div class="empty">No submissions yet.</div>`}`;
 
   main.querySelectorAll("[data-rev]").forEach(tr =>
     tr.addEventListener("click", () => openDrawer(tr.dataset.rev)));
@@ -862,7 +871,7 @@ VIEWS.review = async (main) => {
 // ---------- drawer: audit trail ----------
 async function openDrawer(id) {
   const box = $("#drawer");
-  box.innerHTML = `<div class="drawer"><div class="panel"><p class="muted">Load…</p></div></div>`;
+  box.innerHTML = `<div class="drawer"><div class="panel"><p class="muted">Loading…</p></div></div>`;
   box.querySelector(".drawer").addEventListener("click", e => {
     if (e.target.classList.contains("drawer")) box.innerHTML = "";
   });
@@ -875,7 +884,7 @@ async function openDrawer(id) {
   box.querySelector(".panel").innerHTML = `
     <div class="spread">
       <h1 style="margin:0">Submission #${d.id}</h1>
-      <button class="btn-2 btn-sm" data-close>Band karo</button>
+      <button class="btn-2 btn-sm" data-close>Close</button>
     </div>
     <p class="sub" style="margin-top:8px">${pill(d.status)}
       ${d.reason ? `<span class="small muted"> &middot; ${esc(REASON_LABEL[d.reason] || d.reason)}</span>` : ""}</p>
@@ -883,41 +892,41 @@ async function openDrawer(id) {
     <div class="card">
       <dl style="margin:0;padding:0;border:0">
         <dt>Post</dt><dd class="mono small">${esc(d.post_url)}</dd>
-        <dt>Bataya</dt><dd>${esc(d.declared_platform)}</dd>
-        <dt>Nikla</dt><dd>${esc(d.resolved_platform || "—")}</dd>
-        <dt>Post ka time</dt><dd>${when(d.published_at)}</dd>
-        <dt>Window me</dt><dd>${d.within_window === null ? "—" : d.within_window ? "haan" : "nahi"}</dd>
+        <dt>Declared</dt><dd>${esc(d.declared_platform)}</dd>
+        <dt>Resolved</dt><dd>${esc(d.resolved_platform || "—")}</dd>
+        <dt>Posted at</dt><dd>${when(d.published_at)}</dd>
+        <dt>In window</dt><dd>${d.within_window === null ? "—" : d.within_window ? "yes" : "no"}</dd>
         <dt>Image</dt><dd>${d.image_verdict
           ? `${esc(d.image_verdict)} &middot; ${d.image_score}%` : "—"}</dd>
-        <dt>Koshishein</dt><dd>${d.attempts}</dd>
+        <dt>Attempts</dt><dd>${d.attempts}</dd>
       </dl>
     </div>
 
     <div class="card">
-      <label class="f">Manual faisla</label>
+      <label class="f">Manual decision</label>
       <div class="field"><input id="note" type="text"
-        placeholder="Kyun — ye record me jaayega"></div>
+        placeholder="The reason — this goes into the record"></div>
       <div class="row" style="margin-top:11px">
-        <button class="btn-ok btn-sm" data-decide="1">Approve karo</button>
-        <button class="btn-bad btn-sm" data-decide="0">Reject karo</button>
-        <button class="btn-2 btn-sm" data-recheck>Dobara check karwao</button>
+        <button class="btn-ok btn-sm" data-decide="1">Approve</button>
+        <button class="btn-bad btn-sm" data-decide="0">Reject</button>
+        <button class="btn-2 btn-sm" data-recheck>Check again</button>
       </div>
     </div>
 
-    <label class="f" style="margin-top:20px">Audit trail &middot; ${d.records.length} koshish</label>
+    <label class="f" style="margin-top:20px">Audit trail &middot; ${d.records.length} attempt${d.records.length === 1 ? "" : "s"}</label>
     ${d.records.map(r => `<div class="card" style="margin-top:8px">
       <div class="spread">
         <b class="small">Attempt ${r.attempt}</b>
         <span class="pill p-${esc(r.outcome)}"><i></i>${esc(r.outcome)}</span>
       </div>
       <dl style="margin-top:10px">
-        <dt>Kab</dt><dd>${when(r.checked_at)}</dd>
-        ${r.reason ? `<dt>Wajah</dt><dd>${esc(REASON_LABEL[r.reason] || r.reason)}</dd>` : ""}
+        <dt>When</dt><dd>${when(r.checked_at)}</dd>
+        ${r.reason ? `<dt>Reason</dt><dd>${esc(REASON_LABEL[r.reason] || r.reason)}</dd>` : ""}
         ${r.image_verdict ? `<dt>Image</dt><dd>${esc(r.image_verdict)} &middot; ${r.image_score}%</dd>` : ""}
-        ${r.checked_asset_sha256 ? `<dt>Kis image se</dt>
+        ${r.checked_asset_sha256 ? `<dt>Compared with</dt>
           <dd class="mono small">${esc(r.checked_asset_sha256.slice(0, 16))}…</dd>` : ""}
-        <dt>Images try ki</dt><dd>${r.assets_tried}</dd>
-        ${r.duration_ms ? `<dt>Laga</dt><dd>${(r.duration_ms / 1000).toFixed(1)}s</dd>` : ""}
+        <dt>Images tried</dt><dd>${r.assets_tried}</dd>
+        ${r.duration_ms ? `<dt>Took</dt><dd>${(r.duration_ms / 1000).toFixed(1)}s</dd>` : ""}
         ${r.error_detail ? `<dt>Detail</dt><dd class="small">${esc(r.error_detail)}</dd>` : ""}
       </dl>
     </div>`).join("")}`;
@@ -928,11 +937,11 @@ async function openDrawer(id) {
   box.querySelectorAll("[data-decide]").forEach(b =>
     b.addEventListener("click", async () => {
       const note = box.querySelector("#note").value.trim();
-      if (note.length < 3) return toast("Wajah likhiye — record me jaayegi", "bad");
+      if (note.length < 3) return toast("Write a reason — it goes into the record", "bad");
       try {
         await api(`/v1/admin/submissions/${id}/decide`, {method: "POST", admin: true,
           body: {approve: b.dataset.decide === "1", note}});
-        toast("Faisla record ho gaya", "ok");
+        toast("Decision recorded", "ok");
         close();
       } catch (e) { toast(e.message, "bad"); }
     }));
@@ -940,7 +949,7 @@ async function openDrawer(id) {
   box.querySelector("[data-recheck]").addEventListener("click", async () => {
     try {
       await api(`/v1/admin/submissions/${id}/recheck`, {method: "POST", admin: true});
-      toast("Dobara queue me daal diya", "ok");
+      toast("Put back in the queue", "ok");
       close();
     } catch (e) { toast(e.message, "bad"); }
   });

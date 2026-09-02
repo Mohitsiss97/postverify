@@ -1,0 +1,20 @@
+# Lint configuration. The line length matches the style the code was written in.
+line-length = 92
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+    # Function calls in argument defaults are how FastAPI declares dependencies.
+    "B008",
+    # timezone.utc is explicit and reads well; datetime.UTC would be churn
+    # across ~40 call sites for no gain.
+    "UP017",
+]
+
+[lint.per-file-ignores]
+# Test setup must set the environment before app.config is imported, so the
+# imports in conftest deliberately come after that assignment.
+"tests/conftest.py" = ["E402"]
+# Migration files are generated; leave their formatting to Alembic.
+"migrations/versions/*" = ["E501", "I001"]

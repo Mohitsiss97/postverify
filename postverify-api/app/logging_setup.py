@@ -1,7 +1,7 @@
 """Logging: readable during development, machine-readable in production.
 
-JSON is used in production because logs there are read by a tool (CloudWatch,
-Loki, Datadog) rather than by a person with grep.
+JSON is the production default because logs there are read by a tool
+(CloudWatch, Loki, Datadog) rather than by a person with grep.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from .config import settings
+from . import config
 
 _SKIP = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None)))
 
@@ -25,7 +25,7 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
-        # Carry through structured fields, e.g. extra={"submission_id": 5}
+        # Carry through structured fields, e.g. logger.info(..., extra={"request_id": x})
         for key, value in record.__dict__.items():
             if key not in _SKIP and not key.startswith("_"):
                 payload[key] = value
@@ -34,7 +34,7 @@ class JsonFormatter(logging.Formatter):
 
 def configure_logging() -> None:
     handler = logging.StreamHandler(sys.stdout)
-    if settings.log_json:
+    if config.json_logs():
         handler.setFormatter(JsonFormatter())
     else:
         handler.setFormatter(logging.Formatter(
@@ -43,7 +43,7 @@ def configure_logging() -> None:
 
     root = logging.getLogger()
     root.handlers = [handler]
-    root.setLevel(settings.log_level.upper())
+    root.setLevel(config.log_level())
 
     # These two are noisy, and the noise is not ours.
     logging.getLogger("httpx").setLevel(logging.WARNING)
