@@ -136,6 +136,15 @@ app/
   routers/          campaigns, submissions, admin
   web/index.html    the UI, one self-contained file
 migrations/         Alembic; the schema is owned here, never by create_all
+scripts/            development tools; not copied into the production image
+```
+
+`scripts/seed_demo.py` creates three demo campaigns against a running portal —
+one realistic, one that should be approved, one that should fail on the image —
+so the whole flow can be walked through by hand:
+
+```bash
+python scripts/seed_demo.py matching.jpg different.jpg
 ```
 
 Two files repay reading first: `verification.py` for the rules and the order they
