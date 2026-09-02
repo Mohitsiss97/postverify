@@ -15,7 +15,7 @@ uvicorn app.main:app --port 8000  # docs: http://localhost:8000/docs
 
 | Folder | Kya hai |
 |---|---|
-| **[campaign-portal/](campaign-portal/)** | **Poora product.** Campaign, creatives, user submissions, aur "sahi image + 24 ghante ke andar" ka faisla. |
+| **[campaign-portal/](campaign-portal/)** | **Poora product** — web UI ke saath. Campaign, creatives, user submissions, aur "sahi image + 24 ghante ke andar" ka faisla. |
 | **[postverify-api/](postverify-api/)** | **Verification engine.** Teen endpoints — portal isi ko call karta hai. |
 | [postverify/](postverify/) | Wahi engine, par web page ke saath — khud check karne ke liye. |
 | [posttime/](posttime/) | Pehli service: sirf upload time. Reference ke liye. |
@@ -222,7 +222,7 @@ pe public service banani ho to unki official API leni chahiye.
 ## Tests
 
 ```bash
-cd campaign-portal && pytest -q    # 58 tests
+cd campaign-portal && pytest -q    # 59 tests
 cd postverify-api  && pytest -q    # 147 tests
 cd postverify      && pytest -q    # 167 tests
 cd posttime        && pytest -q    # 106 tests

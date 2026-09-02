@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaign Portal</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#fff; --panel-2:#f8fafb;
+    --line:#dfe4e9; --line-soft:#eceff2;
+    --ink:#11161c; --muted:#5d6874; --faint:#8d98a5;
+    --accent:#0084cc; --accent-soft:#e4f2fa; --accent-line:#b6dcf0;
+    --ok:#0f7a52; --ok-soft:#e2f3ec; --ok-line:#b7e2ce;
+    --warn:#9a5a08; --warn-soft:#fbf0e0; --warn-line:#efd6ab;
+    --bad:#b52a2a; --bad-soft:#fbeaea; --bad-line:#f0c4c4;
+    --radius:10px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#0c1015; --panel:#131a22; --panel-2:#171f28;
+      --line:#26313d; --line-soft:#1c242e;
+      --ink:#e6ecf2; --muted:#94a2b1; --faint:#6a7784;
+      --accent:#3aaee6; --accent-soft:#102636; --accent-line:#1d4256;
+      --ok:#4cd39c; --ok-soft:#0e2a20; --ok-line:#1d4a38;
+      --warn:#e4a35d; --warn-soft:#2a1e11; --warn-line:#4a3719;
+      --bad:#ef8b8b; --bad-soft:#2b1414; --bad-line:#4d2424;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c1015; --panel:#131a22; --panel-2:#171f28;
+    --line:#26313d; --line-soft:#1c242e;
+    --ink:#e6ecf2; --muted:#94a2b1; --faint:#6a7784;
+    --accent:#3aaee6; --accent-soft:#102636; --accent-line:#1d4256;
+    --ok:#4cd39c; --ok-soft:#0e2a20; --ok-line:#1d4a38;
+    --warn:#e4a35d; --warn-soft:#2a1e11; --warn-line:#4a3719;
+    --bad:#ef8b8b; --bad-soft:#2b1414; --bad-line:#4d2424;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  code,.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;
+    transition-duration:.001ms!important}}
+
+  /* ---------- topbar ---------- */
+  .top{position:sticky;top:0;z-index:20;background:var(--panel);
+    border-bottom:1px solid var(--line)}
+  .top-in{max-width:1180px;margin:0 auto;padding:12px 20px;
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .brand{font-weight:650;font-size:16px;letter-spacing:-.015em;
+    display:flex;align-items:center;gap:9px}
+  .brand i{width:9px;height:9px;border-radius:50%;background:var(--accent);
+    display:inline-block;flex:none}
+  .who{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px}
+  .who label{color:var(--faint);font-size:11px;letter-spacing:.09em;
+    text-transform:uppercase;font-weight:600}
+  .who input{width:132px;padding:6px 10px;border:1px solid var(--line);
+    border-radius:7px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+
+  /* ---------- shell ---------- */
+  .shell{max-width:1180px;margin:0 auto;padding:22px 20px 80px;
+    display:grid;grid-template-columns:190px minmax(0,1fr);gap:26px}
+  @media (max-width:860px){.shell{grid-template-columns:minmax(0,1fr)}}
+  .rail{align-self:start;position:sticky;top:66px}
+  @media (max-width:860px){.rail{position:static}}
+  .rail h3{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;margin:0 0 8px}
+  .rail h3+nav{margin-bottom:20px}
+  .rail nav{display:flex;flex-direction:column;gap:2px}
+  .rail a{color:var(--muted);text-decoration:none;font-size:14px;padding:7px 11px;
+    border-radius:7px;cursor:pointer;border:1px solid transparent}
+  .rail a:hover{background:var(--panel);color:var(--ink)}
+  .rail a.on{background:var(--accent-soft);color:var(--accent);
+    border-color:var(--accent-line);font-weight:500}
+  .rail a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  /* ---------- generic ---------- */
+  h1{font-size:21px;letter-spacing:-.02em;margin:0 0 4px;text-wrap:balance}
+  .sub{color:var(--muted);font-size:13.5px;margin:0 0 20px;max-width:70ch}
+  .card{background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:18px}
+  .card+.card{margin-top:14px}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .spread{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    flex-wrap:wrap}
+  .muted{color:var(--muted)} .faint{color:var(--faint)}
+  .small{font-size:12.5px}
+  hr{border:0;border-top:1px solid var(--line-soft);margin:16px 0}
+
+  label.f{display:block;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;margin:0 0 6px}
+  input[type=text],input[type=url],input[type=number],select,textarea{
+    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;
+    background:var(--bg);color:var(--ink);font:inherit;font-size:14px}
+  textarea{min-height:70px;resize:vertical}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);
+    outline-offset:-1px;border-color:transparent}
+  .field+.field{margin-top:13px}
+
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid transparent;
+    padding:9px 15px;font-size:14px;font-weight:500}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .btn{background:var(--accent);color:#fff}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn-2{background:var(--panel);color:var(--ink);border-color:var(--line)}
+  .btn-2:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-sm{padding:5px 11px;font-size:12.5px}
+  .btn-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+  .btn-bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-line)}
+  .link{background:none;border:0;color:var(--accent);padding:0;font-size:13px;
+    text-decoration:underline;text-underline-offset:2px}
+
+  /* ---------- status pills ---------- */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
+    font-weight:600;padding:3px 9px;border-radius:99px;border:1px solid transparent;
+    white-space:nowrap}
+  .pill i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+  .p-approved{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+  .p-rejected{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-line)}
+  .p-pending,.p-verifying{background:var(--warn-soft);color:var(--warn);
+    border-color:var(--warn-line)}
+  .p-error{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-line)}
+  .p-active{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+  .p-draft{background:var(--line-soft);color:var(--faint)}
+  .p-closed{background:var(--line-soft);color:var(--faint)}
+  .p-completed{background:var(--accent-soft);color:var(--accent);
+    border-color:var(--accent-line)}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+  .p-pending i,.p-verifying i{animation:blink 1.1s ease-in-out infinite}
+
+  /* ---------- tables ---------- */
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--panel)}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line-soft);
+    vertical-align:middle}
+  th{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+    font-weight:600;background:var(--panel-2);border-bottom:1px solid var(--line);
+    white-space:nowrap}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr.clickable{cursor:pointer}
+  tbody tr.clickable:hover{background:var(--panel-2)}
+  td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* ---------- creative ---------- */
+  .shot{border:1px solid var(--line);border-radius:9px;overflow:hidden;
+    background:var(--bg)}
+  .shot img{display:block;width:100%;height:150px;object-fit:cover}
+  .shot .meta{padding:8px 10px;font-size:12px;color:var(--muted);
+    display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .pick{position:relative;cursor:pointer}
+  .pick input{position:absolute;opacity:0;pointer-events:none}
+  .pick.sel{outline:2px solid var(--accent);outline-offset:1px}
+  .pick.sel .meta{background:var(--accent-soft);color:var(--accent)}
+
+  /* ---------- result ---------- */
+  .verdict{display:flex;gap:14px;align-items:flex-start}
+  .verdict .icon{width:38px;height:38px;border-radius:50%;flex:none;
+    display:grid;place-items:center;font-size:19px;font-weight:700}
+  .v-ok .icon{background:var(--ok-soft);color:var(--ok)}
+  .v-bad .icon{background:var(--bad-soft);color:var(--bad)}
+  .v-wait .icon{background:var(--warn-soft);color:var(--warn)}
+  .verdict h2{margin:0;font-size:17px;letter-spacing:-.01em}
+  .v-ok h2{color:var(--ok)} .v-bad h2{color:var(--bad)} .v-wait h2{color:var(--warn)}
+  .verdict p{margin:5px 0 0;color:var(--muted);font-size:13.5px;max-width:62ch}
+
+  dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin:16px 0 0;
+    padding-top:14px;border-top:1px solid var(--line-soft);font-size:13px}
+  dt{color:var(--faint)} dd{margin:0;word-break:break-word}
+  dd a{color:var(--accent)}
+
+  .checks{display:flex;flex-direction:column;gap:7px;margin-top:14px}
+  .chk{display:flex;gap:9px;align-items:flex-start;font-size:13.5px}
+  .chk b{width:17px;flex:none;text-align:center;font-weight:700}
+  .chk.pass b{color:var(--ok)} .chk.fail b{color:var(--bad)}
+  .chk.skip b{color:var(--faint)} .chk.skip{color:var(--faint)}
+
+  .bar{height:6px;border-radius:99px;background:var(--line-soft);overflow:hidden;
+    margin-top:10px}
+  .bar i{display:block;height:100%;border-radius:99px;background:var(--accent);
+    transition:width .3s}
+
+  .empty{text-align:center;padding:40px 20px;color:var(--faint);font-size:14px}
+  .toast{position:fixed;right:18px;bottom:18px;z-index:50;max-width:360px;
+    background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:9px;padding:12px 14px;font-size:13.5px;
+    box-shadow:0 8px 24px rgba(0,0,0,.13)}
+  .toast.bad{border-left-color:var(--bad)}
+  .toast.ok{border-left-color:var(--ok)}
+  .toast b{display:block;margin-bottom:2px}
+
+  .drawer{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.4);
+    display:flex;justify-content:flex-end}
+  .drawer .panel{width:min(560px,100%);background:var(--bg);overflow-y:auto;
+    padding:22px;border-left:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand"><i></i> Campaign Portal</div>
+    <div class="who">
+      <label for="uid">Main hoon</label>
+      <input id="uid" type="text" placeholder="ravi" autocomplete="off">
+      <label for="atok" style="margin-left:6px">Admin token</label>
+      <input id="atok" type="text" placeholder="khali chalega" autocomplete="off">
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="rail">
+    <h3>Mera hissa</h3>
+    <nav>
+      <a data-go="campaigns">Campaigns</a>
+      <a data-go="mine">Meri submissions</a>
+    </nav>
+    <h3>Admin</h3>
+    <nav>
+      <a data-go="manage">Campaigns manage</a>
+      <a data-go="review">Submissions review</a>
+    </nav>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<div id="toasts"></div>
+<div id="drawer"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const ES = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ES[c]);
+
+// ---------- pehchan (abhi auth nahi hai, isliye yahin se) ----------
+const store = {
+  get user() { try { return localStorage.getItem("cp_user") || "ravi"; } catch { return "ravi"; } },
+  set user(v) { try { localStorage.setItem("cp_user", v); } catch {} },
+  get admin() { try { return localStorage.getItem("cp_admin") || ""; } catch { return ""; } },
+  set admin(v) { try { localStorage.setItem("cp_admin", v); } catch {} },
+};
+$("#uid").value = store.user;
+$("#atok").value = store.admin;
+$("#uid").addEventListener("change", e => { store.user = e.target.value.trim() || "ravi"; render(); });
+$("#atok").addEventListener("change", e => { store.admin = e.target.value.trim(); });
+
+// ---------- API ----------
+async function api(path, {method = "GET", body, form, admin = false} = {}) {
+  const headers = {"X-User-Id": store.user};
+  if (admin && store.admin) headers["X-Admin-Token"] = store.admin;
+  let payload;
+  if (form) payload = form;
+  else if (body) { headers["content-type"] = "application/json"; payload = JSON.stringify(body); }
+
+  const r = await fetch(path, {method, headers, body: payload});
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+
+  if (!r.ok) {
+    // Do shapes aa sakte hain: HTTPException {detail:{...}} aur validation {error,...}
+    const d = (data && data.detail) || data || {};
+    throw new Error(d.message || d.error || `HTTP ${r.status}`);
+  }
+  return data;
+}
+
+function toast(message, kind = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.innerHTML = `<b>${kind === "bad" ? "Nahi ho paya" : kind === "ok" ? "Ho gaya" : "Suno"}</b>${esc(message)}`;
+  $("#toasts").append(el);
+  setTimeout(() => el.remove(), 5200);
+}
+
+// ---------- chhote helpers ----------
+const pill = (status) => `<span class="pill p-${esc(status)}"><i></i>${esc(status)}</span>`;
+const when = (iso) => iso ? new Date(iso).toLocaleString(undefined,
+  {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "—";
+const REASON_LABEL = {
+  too_old: "Post window se purani",
+  image_mismatch: "Image match nahi hui",
+  wrong_platform: "Platform galat bataya",
+  duplicate: "Post pehle submit ho chuki",
+  post_not_found: "Post khuli hi nahi",
+  no_image_in_post: "Post me image nahi",
+  unsupported_url: "Link support nahi",
+  campaign_closed: "Campaign band",
+  manual_reject: "Admin ne reject kiya",
+  engine_unavailable: "Verification service down",
+  time_not_available: "Post ka time nahi mila",
+  no_campaign_assets: "Campaign me image nahi",
+};
+
+// ---------- routing ----------
+let route = {view: "campaigns", id: null};
+const timers = new Set();
+function clearTimers() { timers.forEach(clearTimeout); timers.clear(); }
+function later(fn, ms) { const t = setTimeout(fn, ms); timers.add(t); return t; }
+
+function go(view, id = null) {
+  route = {view, id};
+  location.hash = id ? `${view}/${id}` : view;
+  render();
+}
+addEventListener("hashchange", () => {
+  const [view, id] = location.hash.slice(1).split("/");
+  if (view && (view !== route.view || id != route.id)) {
+    route = {view, id: id || null};
+    render();
+  }
+});
+document.querySelectorAll("[data-go]").forEach(a =>
+  a.addEventListener("click", () => go(a.dataset.go)));
+
+function markRail() {
+  document.querySelectorAll(".rail a").forEach(a =>
+    a.classList.toggle("on", a.dataset.go === route.view
+      || (route.view === "campaign" && a.dataset.go === "campaigns")
+      || (route.view === "submission" && a.dataset.go === "mine")));
+}
+
+async function render() {
+  clearTimers();
+  markRail();
+  const main = $("#main");
+  main.innerHTML = `<p class="muted">Load ho raha hai…</p>`;
+  // Yahan `??` use karna galat tha: view chalti hai par undefined return karti
+  // hai, aur `undefined ?? notFound()` uske render ko mita deta hai.
+  const view = VIEWS[route.view];
+  if (!view) { notFound(main); return; }
+  try {
+    await view(main, route.id);
+  } catch (e) {
+    main.innerHTML = `<div class="card"><h1>Kuch atak gaya</h1>
+      <p class="sub">${esc(e.message)}</p>
+      <button class="btn-2" onclick="location.reload()">Dobara koshish</button></div>`;
+  }
+}
+const notFound = m => { m.innerHTML = `<div class="empty">Ye page nahi mila</div>`; };
+
+// ---------- VIEW: campaigns (user) ----------
+const VIEWS = {};
+
+VIEWS.campaigns = async (main) => {
+  const rows = await api("/v1/campaigns?status=active");
+  const mine = await api("/v1/enrollments");
+  const joined = new Map(mine.map(e => [e.campaign_id, e]));
+
+  main.innerHTML = `
+    <h1>Campaigns</h1>
+    <p class="sub">Jis campaign me shaamil hona hai use kholiye, uski image download
+      kijiye, apne social account pe post kijiye — phir us post ka link yahin daaliye.</p>
+    ${rows.length ? `<div class="grid g2">${rows.map(c => {
+      const e = joined.get(c.id);
+      return `<div class="card">
+        <div class="spread">
+          <b>${esc(c.title)}</b>
+          ${e ? pill(e.status === "completed" ? "completed" : "active") : ""}
+        </div>
+        <p class="small muted" style="margin:7px 0 0">
+          ${esc(c.description || "Post ka window: " + c.window_hours + " ghante")}</p>
+        <div class="row" style="margin-top:14px">
+          <button class="btn btn-sm" data-open="${c.id}">
+            ${e ? "Kholo" : "Shaamil ho"}</button>
+          <span class="faint small">${c.window_hours} ghante ka window</span>
+        </div>
+      </div>`;
+    }).join("")}</div>` : `<div class="empty">Abhi koi campaign chalu nahi hai.<br>
+      <span class="small">Admin &rarr; Campaigns manage se ek banaiye.</span></div>`}`;
+
+  main.querySelectorAll("[data-open]").forEach(b =>
+    b.addEventListener("click", async () => {
+      const id = Number(b.dataset.open);
+      try {
+        await api(`/v1/campaigns/${id}/enroll`, {method: "POST"});
+        go("campaign", id);
+      } catch (e) { toast(e.message, "bad"); }
+    }));
+};
+
+// ---------- VIEW: ek campaign (user) ----------
+VIEWS.campaign = async (main, id) => {
+  const campaign = await api(`/v1/campaigns/${id}`);
+  const enrollments = await api("/v1/enrollments");
+  const enrollment = enrollments.find(e => e.campaign_id === Number(id));
+  const subs = await api(`/v1/submissions?campaign_id=${id}`);
+  const live = subs.find(s => s.status === "pending" || s.status === "verifying");
+
+  main.innerHTML = `
+    <button class="link" data-back>&larr; sab campaigns</button>
+    <h1 style="margin-top:10px">${esc(campaign.title)}</h1>
+    <p class="sub">Post <b>${campaign.window_hours} ghante</b> ke andar ki honi chahiye,
+      aur usme neeche waali image honi chahiye.</p>
+
+    <div class="card">
+      <label class="f">1 &middot; Image download kijiye</label>
+      <p class="small muted" style="margin:0 0 12px">Jise post karna hai use chuniye —
+        submit karte waqt wahi bhej denge, isse check tez hota hai.</p>
+      <div class="grid g3" id="assets">
+        ${campaign.assets.map((a, i) => `
+          <label class="shot pick ${i === 0 ? "sel" : ""}" data-asset="${a.id}">
+            <input type="radio" name="asset" value="${a.id}" ${i === 0 ? "checked" : ""}>
+            <img src="/v1/campaigns/${campaign.id}/assets/${a.id}/file" alt="">
+            <span class="meta"><span>${esc(a.filename)}</span>
+              <a href="/v1/campaigns/${campaign.id}/assets/${a.id}/file"
+                 download onclick="event.stopPropagation()">download</a></span>
+          </label>`).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="f">2 &middot; Post karke uska link daaliye</label>
+      ${live ? `<p class="small muted" style="margin:0 0 12px">
+        Aapka ek submission abhi check ho raha hai — uska nateeja aane ke baad naya bhej sakte hain.</p>` : ""}
+      <div class="field">
+        <input id="url" type="url" placeholder="https://www.instagram.com/p/XXXXXXXX/"
+               ${live ? "disabled" : ""}>
+      </div>
+      <div class="field">
+        <label class="f" for="plat">Kis platform pe post kiya</label>
+        <select id="plat" ${live ? "disabled" : ""}>
+          <option value="instagram">Instagram</option>
+          <option value="facebook">Facebook</option>
+          <option value="x">X (Twitter)</option>
+          <option value="linkedin">LinkedIn</option>
+          <option value="youtube">YouTube</option>
+        </select>
+      </div>
+      <button class="btn" id="send" style="margin-top:15px" ${live ? "disabled" : ""}>
+        Submit karo</button>
+    </div>
+
+    <div id="live"></div>
+
+    ${subs.length ? `<h3 style="font-size:13px;margin:26px 0 10px" class="faint">
+      IS CAMPAIGN KI MERI SUBMISSIONS</h3>
+      ${submissionTable(subs)}` : ""}`;
+
+  main.querySelector("[data-back]").addEventListener("click", () => go("campaigns"));
+  main.querySelectorAll(".pick").forEach(p => p.addEventListener("click", () => {
+    main.querySelectorAll(".pick").forEach(x => x.classList.remove("sel"));
+    p.classList.add("sel");
+  }));
+
+  if (live) watch(live.id, main.querySelector("#live"));
+
+  main.querySelector("#send")?.addEventListener("click", async () => {
+    const url = main.querySelector("#url").value.trim();
+    if (!url) return toast("Post ka link daaliye", "bad");
+    const asset = main.querySelector(".pick.sel")?.dataset.asset;
+    const btn = main.querySelector("#send");
+    btn.disabled = true; btn.textContent = "Bhej rahe hain…";
+    try {
+      const created = await api("/v1/submissions", {method: "POST", body: {
+        enrollment_id: enrollment.id,
+        post_url: url,
+        platform: main.querySelector("#plat").value,
+        asset_id: asset ? Number(asset) : null,
+      }});
+      main.querySelector("#url").value = "";
+      watch(created.id, main.querySelector("#live"));
+    } catch (e) {
+      toast(e.message, "bad");
+    } finally {
+      btn.disabled = false; btn.textContent = "Submit karo";
+    }
+  });
+};
+
+// ---------- live status ----------
+async function watch(id, box) {
+  const started = Date.now();
+  const tick = async () => {
+    let d;
+    try { d = await api(`/v1/submissions/${id}`); }
+    catch (e) { box.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; return; }
+
+    box.innerHTML = resultCard(d, Date.now() - started);
+    if (d.status === "pending" || d.status === "verifying") later(tick, 2000);
+    else if (d.status === "approved") toast("Aapka submission approve ho gaya", "ok");
+  };
+  await tick();
+}
+
+function resultCard(d, elapsedMs) {
+  const waiting = d.status === "pending" || d.status === "verifying";
+  const ok = d.status === "approved";
+  const kind = waiting ? "v-wait" : ok ? "v-ok" : "v-bad";
+  const icon = waiting ? "…" : ok ? "✓" : "!";
+  const seconds = Math.round(elapsedMs / 1000);
+
+  const title = waiting ? "Check ho raha hai"
+    : ok ? "Sab sahi hai" : (REASON_LABEL[d.reason] || "Reject ho gaya");
+
+  return `<div class="card ${kind}" style="margin-top:14px">
+    <div class="verdict ${kind}">
+      <div class="icon">${icon}</div>
+      <div style="min-width:0">
+        <h2>${esc(title)}</h2>
+        <p>${esc(d.message || (waiting
+          ? "Post kholi ja rahi hai. Instagram aur Facebook pe 15-20 second lagte hain."
+          : ""))}</p>
+      </div>
+      <span style="margin-left:auto">${pill(d.status)}</span>
+    </div>
+
+    ${waiting ? `<div class="bar"><i style="width:${Math.min(seconds / 20 * 100, 95)}%"></i></div>
+      <p class="small faint" style="margin:7px 0 0">${seconds}s</p>`
+    : `<div class="checks">
+        ${check(d.resolved_platform ? "pass" : "skip",
+                d.resolved_platform
+                  ? `Platform: ${d.resolved_platform}` + (d.reason === "wrong_platform"
+                      ? ` — aapne ${d.declared_platform} bataya tha` : "")
+                  : "Platform pehchana nahi gaya",
+                d.reason === "wrong_platform" ? "fail" : null)}
+        ${check(d.within_window === true ? "pass" : d.within_window === false ? "fail" : "skip",
+                d.published_at
+                  ? `Post ka time: ${when(d.published_at)}`
+                  : "Post ka time nahi mila")}
+        ${check(d.reason === "image_mismatch" ? "fail"
+                : d.image_verdict ? "pass" : "skip",
+                d.image_verdict
+                  ? `Image: ${d.image_verdict} (${d.image_score}% match)`
+                  : "Image check nahi hua")}
+        ${d.reason === "duplicate"
+          ? check("fail", "Ye post pehle hi submit ho chuki hai") : ""}
+      </div>
+      <dl>
+        <dt>Post</dt><dd>${d.canonical_url
+          ? `<a href="${esc(d.canonical_url)}" target="_blank" rel="noopener">${esc(d.canonical_url)}</a>`
+          : esc(d.post_url)}</dd>
+        <dt>Submit kiya</dt><dd>${when(d.created_at)}</dd>
+        ${d.verified_at ? `<dt>Check hua</dt><dd>${when(d.verified_at)}</dd>` : ""}
+        ${d.attempts > 1 ? `<dt>Koshishein</dt><dd>${d.attempts}</dd>` : ""}
+      </dl>`}
+  </div>`;
+}
+
+function check(state, text, override) {
+  const s = override || state;
+  const mark = s === "pass" ? "✓" : s === "fail" ? "✕" : "–";
+  return `<div class="chk ${s}"><b>${mark}</b><span>${esc(text)}</span></div>`;
+}
+
+// ---------- VIEW: meri submissions ----------
+VIEWS.mine = async (main) => {
+  const rows = await api("/v1/submissions");
+  main.innerHTML = `
+    <h1>Meri submissions</h1>
+    <p class="sub">Aapke bheje hue saare links aur unka nateeja.</p>
+    ${rows.length ? submissionTable(rows, true) : `<div class="empty">Abhi kuch nahi bheja.</div>`}`;
+  wireRows(main);
+};
+
+function submissionTable(rows, showCampaign = false) {
+  return `<div class="tw"><table>
+    <thead><tr>
+      ${showCampaign ? "<th>Campaign</th>" : ""}
+      <th>Post</th><th>Status</th><th>Wajah</th><th>Kab</th>
+    </tr></thead>
+    <tbody>${rows.map(s => `<tr class="clickable" data-sub="${s.id}">
+      ${showCampaign ? `<td class="num">#${s.campaign_id}</td>` : ""}
+      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <span class="mono small">${esc(s.post_url)}</span></td>
+      <td>${pill(s.status)}</td>
+      <td class="small muted">${esc(REASON_LABEL[s.reason] || (s.reason || "—"))}</td>
+      <td class="num small muted">${when(s.created_at)}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function wireRows(scope) {
+  scope.querySelectorAll("[data-sub]").forEach(tr =>
+    tr.addEventListener("click", () => go("submission", tr.dataset.sub)));
+}
+
+VIEWS.submission = async (main, id) => {
+  const d = await api(`/v1/submissions/${id}`);
+  main.innerHTML = `<button class="link" data-back>&larr; wapas</button>
+    <h1 style="margin-top:10px">Submission #${d.id}</h1>
+    <p class="sub">Campaign #${d.campaign_id}</p>
+    <div id="live"></div>`;
+  main.querySelector("[data-back]").addEventListener("click", () => go("mine"));
+  watch(d.id, main.querySelector("#live"));
+};
+
+// ---------- VIEW: admin campaigns ----------
+VIEWS.manage = async (main) => {
+  const rows = await api("/v1/campaigns");
+  main.innerHTML = `
+    <h1>Campaigns manage</h1>
+    <p class="sub">Campaign banaiye, uski image add kijiye, phir activate.
+      Bina image ke activate nahi hoti — warna har submission reject hota.</p>
+
+    <div class="card">
+      <label class="f">Nayi campaign</label>
+      <div class="row" style="gap:10px;align-items:flex-end">
+        <div style="flex:2 1 240px"><input id="ntitle" type="text" placeholder="Diwali Campaign"></div>
+        <div style="flex:0 0 130px">
+          <label class="f" for="nwin">Window (ghante)</label>
+          <input id="nwin" type="number" value="24" min="1" max="2160">
+        </div>
+        <button class="btn" id="ncreate">Banao</button>
+      </div>
+    </div>
+
+    ${rows.length ? `<div class="tw" style="margin-top:14px"><table>
+      <thead><tr><th>#</th><th>Title</th><th>Status</th><th>Window</th>
+        <th>Images</th><th></th></tr></thead>
+      <tbody>${rows.map(c => `<tr>
+        <td class="num">${c.id}</td>
+        <td>${esc(c.title)}</td>
+        <td>${pill(c.status)}</td>
+        <td class="num">${c.window_hours}h</td>
+        <td class="num" data-count="${c.id}">—</td>
+        <td><button class="btn-2 btn-sm" data-edit="${c.id}">Kholo</button></td>
+      </tr>`).join("")}</tbody></table></div>` : ""}`;
+
+  main.querySelector("#ncreate").addEventListener("click", async () => {
+    const title = main.querySelector("#ntitle").value.trim();
+    if (title.length < 3) return toast("Title kam se kam 3 akshar ka ho", "bad");
+    try {
+      const c = await api("/v1/campaigns", {method: "POST", admin: true, body: {
+        title, window_hours: Number(main.querySelector("#nwin").value) || 24}});
+      toast(`Campaign #${c.id} ban gayi — ab image add kijiye`, "ok");
+      go("edit", c.id);
+    } catch (e) { toast(e.message, "bad"); }
+  });
+
+  main.querySelectorAll("[data-edit]").forEach(b =>
+    b.addEventListener("click", () => go("edit", b.dataset.edit)));
+
+  for (const td of main.querySelectorAll("[data-count]")) {
+    api(`/v1/campaigns/${td.dataset.count}/assets`)
+      .then(a => td.textContent = a.length)
+      .catch(() => td.textContent = "?");
+  }
+};
+
+VIEWS.edit = async (main, id) => {
+  const c = await api(`/v1/campaigns/${id}`);
+  main.innerHTML = `
+    <button class="link" data-back>&larr; sab campaigns</button>
+    <h1 style="margin-top:10px">${esc(c.title)}</h1>
+    <p class="sub">${pill(c.status)} &nbsp; window ${c.window_hours} ghante</p>
+
+    <div class="card">
+      <div class="spread">
+        <label class="f" style="margin:0">Creatives</label>
+        <label class="btn btn-2 btn-sm" style="margin:0">
+          Image add karo<input id="up" type="file" accept="image/*" hidden></label>
+      </div>
+      ${c.assets.length ? `<div class="grid g3" style="margin-top:13px">
+        ${c.assets.map(a => `<div class="shot">
+          <img src="/v1/campaigns/${c.id}/assets/${a.id}/file" alt="">
+          <span class="meta"><span>${esc(a.filename)}</span>
+            <button class="link" data-del="${a.id}">hatao</button></span>
+        </div>`).join("")}</div>`
+      : `<p class="small muted" style="margin:12px 0 0">Abhi koi image nahi.
+          Activate karne ke liye kam se kam ek chahiye.</p>`}
+    </div>
+
+    <div class="card">
+      <label class="f">Status</label>
+      <div class="row">
+        <button class="btn-2 btn-sm" data-status="draft">Draft</button>
+        <button class="btn-ok btn-sm" data-status="active">Activate</button>
+        <button class="btn-bad btn-sm" data-status="closed">Close</button>
+      </div>
+    </div>`;
+
+  main.querySelector("[data-back]").addEventListener("click", () => go("manage"));
+
+  main.querySelector("#up").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      await api(`/v1/campaigns/${id}/assets`, {method: "POST", form, admin: true});
+      toast("Image add ho gayi", "ok");
+      render();
+    } catch (err) { toast(err.message, "bad"); }
+  });
+
+  main.querySelectorAll("[data-del]").forEach(b =>
+    b.addEventListener("click", async () => {
+      try {
+        await api(`/v1/campaigns/${id}/assets/${b.dataset.del}`,
+                  {method: "DELETE", admin: true});
+        render();
+      } catch (e) { toast(e.message, "bad"); }
+    }));
+
+  main.querySelectorAll("[data-status]").forEach(b =>
+    b.addEventListener("click", async () => {
+      try {
+        await api(`/v1/campaigns/${id}`, {method: "PATCH", admin: true,
+                                          body: {status: b.dataset.status}});
+        toast(`Campaign ab ${b.dataset.status} hai`, "ok");
+        render();
+      } catch (e) { toast(e.message, "bad"); }
+    }));
+};
+
+// ---------- VIEW: admin review ----------
+VIEWS.review = async (main) => {
+  const [rows, stats] = await Promise.all([
+    api("/v1/admin/submissions?limit=100"),
+    api("/v1/admin/stats"),
+  ]);
+  const by = stats.by_status || {};
+  const reasons = stats.by_reject_reason || {};
+
+  main.innerHTML = `
+    <h1>Submissions review</h1>
+    <p class="sub">Sab users ke submissions. Kisi row pe click karke poora audit
+      trail dekh sakte hain — har koshish ka record.</p>
+
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="card">
+        <label class="f">Status</label>
+        <div class="row" style="gap:8px;margin-top:4px">
+          ${["approved","rejected","pending","verifying","error"]
+            .map(s => `<span class="pill p-${s}"><i></i>${s} ${by[s] || 0}</span>`).join("")}
+        </div>
+      </div>
+      <div class="card">
+        <label class="f">Reject ki wajah</label>
+        <div class="row" style="gap:8px;margin-top:4px">
+          ${Object.keys(reasons).length
+            ? Object.entries(reasons).map(([r, n]) =>
+                `<span class="pill p-rejected"><i></i>${esc(REASON_LABEL[r] || r)} ${n}</span>`).join("")
+            : `<span class="faint small">abhi koi nahi</span>`}
+        </div>
+      </div>
+    </div>
+
+    ${rows.length ? `<div class="tw"><table>
+      <thead><tr><th>#</th><th>Campaign</th><th>Post</th><th>Status</th>
+        <th>Wajah</th><th>Score</th><th>Kab</th></tr></thead>
+      <tbody>${rows.map(s => `<tr class="clickable" data-rev="${s.id}">
+        <td class="num">${s.id}</td>
+        <td class="num">#${s.campaign_id}</td>
+        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <span class="mono small">${esc(s.post_url)}</span></td>
+        <td>${pill(s.status)}</td>
+        <td class="small muted">${esc(REASON_LABEL[s.reason] || (s.reason || "—"))}</td>
+        <td class="num small">${s.image_score == null ? "—" : s.image_score + "%"}</td>
+        <td class="num small muted">${when(s.created_at)}</td>
+      </tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">Abhi koi submission nahi aaya.</div>`}`;
+
+  main.querySelectorAll("[data-rev]").forEach(tr =>
+    tr.addEventListener("click", () => openDrawer(tr.dataset.rev)));
+};
+
+// ---------- drawer: audit trail ----------
+async function openDrawer(id) {
+  const box = $("#drawer");
+  box.innerHTML = `<div class="drawer"><div class="panel"><p class="muted">Load…</p></div></div>`;
+  box.querySelector(".drawer").addEventListener("click", e => {
+    if (e.target.classList.contains("drawer")) box.innerHTML = "";
+  });
+
+  let d;
+  try { d = await api(`/v1/admin/submissions/${id}`, {admin: true}); }
+  catch (e) { box.querySelector(".panel").innerHTML =
+    `<p class="muted">${esc(e.message)}</p>`; return; }
+
+  box.querySelector(".panel").innerHTML = `
+    <div class="spread">
+      <h1 style="margin:0">Submission #${d.id}</h1>
+      <button class="btn-2 btn-sm" data-close>Band karo</button>
+    </div>
+    <p class="sub" style="margin-top:8px">${pill(d.status)}
+      ${d.reason ? `<span class="small muted"> &middot; ${esc(REASON_LABEL[d.reason] || d.reason)}</span>` : ""}</p>
+
+    <div class="card">
+      <dl style="margin:0;padding:0;border:0">
+        <dt>Post</dt><dd class="mono small">${esc(d.post_url)}</dd>
+        <dt>Bataya</dt><dd>${esc(d.declared_platform)}</dd>
+        <dt>Nikla</dt><dd>${esc(d.resolved_platform || "—")}</dd>
+        <dt>Post ka time</dt><dd>${when(d.published_at)}</dd>
+        <dt>Window me</dt><dd>${d.within_window === null ? "—" : d.within_window ? "haan" : "nahi"}</dd>
+        <dt>Image</dt><dd>${d.image_verdict
+          ? `${esc(d.image_verdict)} &middot; ${d.image_score}%` : "—"}</dd>
+        <dt>Koshishein</dt><dd>${d.attempts}</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <label class="f">Manual faisla</label>
+      <div class="field"><input id="note" type="text"
+        placeholder="Kyun — ye record me jaayega"></div>
+      <div class="row" style="margin-top:11px">
+        <button class="btn-ok btn-sm" data-decide="1">Approve karo</button>
+        <button class="btn-bad btn-sm" data-decide="0">Reject karo</button>
+        <button class="btn-2 btn-sm" data-recheck>Dobara check karwao</button>
+      </div>
+    </div>
+
+    <label class="f" style="margin-top:20px">Audit trail &middot; ${d.records.length} koshish</label>
+    ${d.records.map(r => `<div class="card" style="margin-top:8px">
+      <div class="spread">
+        <b class="small">Attempt ${r.attempt}</b>
+        <span class="pill p-${esc(r.outcome)}"><i></i>${esc(r.outcome)}</span>
+      </div>
+      <dl style="margin-top:10px">
+        <dt>Kab</dt><dd>${when(r.checked_at)}</dd>
+        ${r.reason ? `<dt>Wajah</dt><dd>${esc(REASON_LABEL[r.reason] || r.reason)}</dd>` : ""}
+        ${r.image_verdict ? `<dt>Image</dt><dd>${esc(r.image_verdict)} &middot; ${r.image_score}%</dd>` : ""}
+        ${r.checked_asset_sha256 ? `<dt>Kis image se</dt>
+          <dd class="mono small">${esc(r.checked_asset_sha256.slice(0, 16))}…</dd>` : ""}
+        <dt>Images try ki</dt><dd>${r.assets_tried}</dd>
+        ${r.duration_ms ? `<dt>Laga</dt><dd>${(r.duration_ms / 1000).toFixed(1)}s</dd>` : ""}
+        ${r.error_detail ? `<dt>Detail</dt><dd class="small">${esc(r.error_detail)}</dd>` : ""}
+      </dl>
+    </div>`).join("")}`;
+
+  const close = () => { box.innerHTML = ""; render(); };
+  box.querySelector("[data-close]").addEventListener("click", close);
+
+  box.querySelectorAll("[data-decide]").forEach(b =>
+    b.addEventListener("click", async () => {
+      const note = box.querySelector("#note").value.trim();
+      if (note.length < 3) return toast("Wajah likhiye — record me jaayegi", "bad");
+      try {
+        await api(`/v1/admin/submissions/${id}/decide`, {method: "POST", admin: true,
+          body: {approve: b.dataset.decide === "1", note}});
+        toast("Faisla record ho gaya", "ok");
+        close();
+      } catch (e) { toast(e.message, "bad"); }
+    }));
+
+  box.querySelector("[data-recheck]").addEventListener("click", async () => {
+    try {
+      await api(`/v1/admin/submissions/${id}/recheck`, {method: "POST", admin: true});
+      toast("Dobara queue me daal diya", "ok");
+      close();
+    } catch (e) { toast(e.message, "bad"); }
+  });
+}
+
+// ---------- start ----------
+const [v, i] = location.hash.slice(1).split("/");
+if (v && VIEWS[v]) route = {view: v, id: i || null};
+render();
+</script>
+</body>
+</html>

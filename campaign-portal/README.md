@@ -23,9 +23,32 @@ browser chalata hai (bhaari, CPU-bound), portal sirf HTTP aur DB (halka).
 pip install -r requirements.txt
 cp .env.example .env
 alembic upgrade head
-uvicorn app.main:app --port 8000      # docs: /docs
-pytest -q                              # 58 tests
+uvicorn app.main:app --port 8000      # UI: /   ·   API docs: /docs
+pytest -q                              # 59 tests
 ```
+
+## Web UI
+
+`/` pe ek UI hai — dono taraf ka kaam usi se ho jaata hai:
+
+**User:** campaigns dekho &rarr; shaamil ho &rarr; creative download karo &rarr;
+post karke link daalo &rarr; result live dikhta hai (2 second me poll hota hai,
+Instagram pe 15-20 second lagte hain).
+
+Result me teen tick/cross saaf dikhte hain — platform, post ka time, aur image —
+taaki user ko pata chale **kya sahi tha aur kya galat**. Sirf "rejected" keh dena
+kaafi nahi hota.
+
+**Admin:** campaign banao, creative upload karo, activate karo; saare submissions
+ek table me, aur kisi bhi row pe click karke poora audit trail — har attempt,
+kis image se compare hua, kitna waqt laga.
+
+UI API ka hi client hai — wahi endpoints call karta hai jo aap karenge. **API me
+kuch nahi badla**; `/` pehle JSON deta tha (schema me tha hi nahi), ab UI deta hai.
+
+Abhi auth nahi hai, isliye UI me upar do khaane hain: **"Main hoon"** (user id,
+jo `X-User-Id` header banta hai) aur **"Admin token"** (khali chhod dijiye jab tak
+`ADMIN_TOKEN` set na ho). Dono browser me yaad rehte hain.
 
 Poora stack (portal + engine + Postgres): `docker compose up`
 
@@ -282,13 +305,14 @@ app/processing.py     decision -> DB, record, retry ka hisaab
 app/worker.py         background queue loop
 app/deps.py           current_user, require_admin, error shape
 app/routers/          campaigns, submissions, admin
+app/web/index.html    web UI (API ka client — usme koi business rule nahi)
 migrations/           Alembic
 ```
 
 ## Tests
 
 ```bash
-pytest -q     # 58 tests
+pytest -q     # 59 tests
 ```
 
 Koi test asli engine ko call nahi karta — sab `FakeEngine` se chalte hain

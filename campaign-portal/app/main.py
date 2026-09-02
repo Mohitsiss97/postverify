@@ -20,10 +20,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from . import worker as worker_module
 from .config import settings
@@ -33,6 +34,8 @@ from .logging_setup import configure_logging
 from .routers import admin, campaigns, submissions
 
 log = logging.getLogger("portal")
+
+_WEB = Path(__file__).parent / "web"
 
 TAGS = [
     {"name": "Campaigns",
@@ -167,5 +170,9 @@ async def ready() -> JSONResponse:
 
 
 @app.get("/", include_in_schema=False)
-async def root() -> dict:
-    return {"service": "Campaign Portal", "docs": "/docs"}
+async def ui():
+    """Web UI. API endpoints isse bilkul alag hain — ye unhi ko call karta hai."""
+    page = _WEB / "index.html"
+    if not page.exists():
+        return JSONResponse({"service": "Campaign Portal", "docs": "/docs"})
+    return FileResponse(page, headers={"Cache-Control": "no-cache"})

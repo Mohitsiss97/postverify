@@ -15,8 +15,19 @@ def test_health(client):
     assert d["status"] == "ok" and d["window_hours"] == 24
 
 
-def test_root_points_at_docs(client):
-    assert client.get("/").json()["docs"] == "/docs"
+def test_root_serves_the_ui(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Campaign Portal" in r.text
+    assert "text/html" in r.headers["content-type"]
+
+
+def test_ui_does_not_touch_the_api(client):
+    """UI add hone se API waise ki waisi rehni chahiye."""
+    spec = client.get("/openapi.json").json()
+    paths = set(spec["paths"])
+    assert "/v1/submissions" in paths and "/v1/campaigns" in paths
+    assert "/" not in paths, "UI route API schema me nahi aana chahiye"
 
 
 # ---------------- campaigns ----------------
