@@ -28,3 +28,4 @@ Thumbs.db
 # campaign-portal ke local artifacts
 campaign-portal/campaign_portal.db*
 campaign-portal/storage/
+.admin-token.txt

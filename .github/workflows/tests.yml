@@ -12,8 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Only the two deployed services. reference/ holds superseded
-        # development work and is deliberately not built or tested.
+        # The two services that make up the product. Both must pass.
         service: [campaign-portal, postverify-api]
 
     steps:

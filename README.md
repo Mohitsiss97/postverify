@@ -47,10 +47,6 @@ common. One browser render costs roughly six seconds and one Chrome process; the
 portal handles hundreds of requests in that time. Deploying them together would
 mean scaling the cheap thing to keep up with the expensive one.
 
-[`reference/`](reference/) holds three earlier services that this pair
-supersedes. They are development history, not part of the deployment, and are
-not built or tested in CI.
-
 ---
 
 ## Running it locally
