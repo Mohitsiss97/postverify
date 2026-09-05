@@ -27,8 +27,10 @@ $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
 $LogDir = Join-Path $Root "logs"
 $EnginePort = 8200
 $PortalPort = 8300
-$ProxyPorts = @(8300, 8080)      # tailnet ports that reach the portal
-$EngineProxyPort = 8201          # tailnet port that reaches the engine
+$ProxyPorts = @(8300, 8080)      # HTTP routes to the portal, matched on hostname
+$EngineProxyPort = 8201          # HTTP route to the engine, matched on hostname
+$PortalTcpPort = 8400            # TCP forward to the portal, works by IP too
+$EngineTcpPort = 8401            # TCP forward to the engine, works by IP too
 
 function Get-PidOnPort($Port) {
     # Loopback only. The tailnet listener on the same port belongs to
@@ -103,6 +105,21 @@ function Start-Services {
             & $Tailscale serve --bg --http=$EngineProxyPort "http://127.0.0.1:$EnginePort" | Out-Null
             Write-Host "  tailnet proxy on $EngineProxyPort -> engine" -ForegroundColor Green
         }
+
+        # An --http route is matched on the Host header, and the header it is
+        # registered under is the node's DNS name. A request to
+        # http://100.x.x.x:8300/ carries the IP as its Host and matches nothing,
+        # so it never reaches the app — which looks exactly like the machine
+        # being unreachable. A --tcp forward does not read the request at all,
+        # so it works whether the caller uses the name or the IP.
+        if ($listening -notcontains "$PortalTcpPort") {
+            & $Tailscale serve --bg --tcp=$PortalTcpPort "tcp://127.0.0.1:$PortalPort" | Out-Null
+            Write-Host "  tailnet TCP forward on $PortalTcpPort -> portal" -ForegroundColor Green
+        }
+        if ($listening -notcontains "$EngineTcpPort") {
+            & $Tailscale serve --bg --tcp=$EngineTcpPort "tcp://127.0.0.1:$EnginePort" | Out-Null
+            Write-Host "  tailnet TCP forward on $EngineTcpPort -> engine" -ForegroundColor Green
+        }
     }
     Show-Status
 }
@@ -162,15 +179,24 @@ function Show-Status {
         } catch { }
         if ($ip -and $listening.Count) {
             Write-Host "`nTailnet ports listening: $($listening -join ', ')" -ForegroundColor DarkGray
+            $dns = (& $Tailscale status --json 2>$null | ConvertFrom-Json).Self.DNSName.TrimEnd('.')
             Write-Host "`nFrom any other machine on the tailnet" -ForegroundColor Cyan
-            Write-Host "  Portal, the app       http://${ip}:$PortalPort/"
-            Write-Host "  Portal, API docs      http://${ip}:$PortalPort/docs"
-            Write-Host "  Engine, API docs      http://${ip}:$EngineProxyPort/docs"
-            Write-Host "  Portal, spare route   http://${ip}:8080/"
+            Write-Host "  By IP - these work from anything:" -ForegroundColor Green
+            Write-Host "    Portal, the app     http://${ip}:$PortalTcpPort/"
+            Write-Host "    Portal, API docs    http://${ip}:$PortalTcpPort/docs"
+            Write-Host "    Engine, API docs    http://${ip}:$EngineTcpPort/docs"
+            if ($dns) {
+                Write-Host "  By name - only where MagicDNS resolves:" -ForegroundColor DarkGray
+                Write-Host "    Portal              http://${dns}:$PortalPort/"
+                Write-Host "    Engine              http://${dns}:$EngineProxyPort/docs"
+            }
             Write-Host ""
-            Write-Host "  Use the IP with an explicit port. A bare hostname gets" -ForegroundColor DarkGray
-            Write-Host "  upgraded to HTTPS by the browser, and this tailnet has no" -ForegroundColor DarkGray
-            Write-Host "  TLS certificate, so that form fails with nothing on screen." -ForegroundColor DarkGray
+            Write-Host "  The IP addresses use a TCP forward, which ignores the Host" -ForegroundColor DarkGray
+            Write-Host "  header. The named ones are HTTP routes registered under the" -ForegroundColor DarkGray
+            Write-Host "  node's DNS name, so an IP in the address bar matches nothing" -ForegroundColor DarkGray
+            Write-Host "  and the request never arrives." -ForegroundColor DarkGray
+            Write-Host "  Always keep the explicit port: a bare hostname gets upgraded" -ForegroundColor DarkGray
+            Write-Host "  to HTTPS, and this tailnet has no TLS certificate." -ForegroundColor DarkGray
         } elseif ($ip) {
             Write-Host "`nNo tailnet proxy configured. Run '.\dev.ps1 start'." -ForegroundColor Yellow
         }
