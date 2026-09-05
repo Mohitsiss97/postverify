@@ -83,14 +83,23 @@ function Start-Services {
     Start-One "portal" "campaign-portal" $PortalPort
 
     if (Test-Path $Tailscale) {
-        $serve = & $Tailscale serve status 2>&1 | Out-String
+        # Which ports tailscaled is actually listening on. Reading this from the
+        # text output also matched each route's proxy *target*, so a route to
+        # 127.0.0.1:8300 looked like a listener on 8300 and the real one was
+        # never created. The JSON says exactly what is listening.
+        $listening = @()
+        try {
+            $cfg = & $Tailscale serve status --json 2>$null | ConvertFrom-Json
+            if ($cfg.TCP) { $listening = $cfg.TCP.PSObject.Properties.Name }
+        } catch { }
+
         foreach ($p in $ProxyPorts) {
-            if ($serve -notmatch ":$p\b") {
+            if ($listening -notcontains "$p") {
                 & $Tailscale serve --bg --http=$p "http://127.0.0.1:$PortalPort" | Out-Null
                 Write-Host "  tailnet proxy on $p -> portal" -ForegroundColor Green
             }
         }
-        if ($serve -notmatch ":$EngineProxyPort\b") {
+        if ($listening -notcontains "$EngineProxyPort") {
             & $Tailscale serve --bg --http=$EngineProxyPort "http://127.0.0.1:$EnginePort" | Out-Null
             Write-Host "  tailnet proxy on $EngineProxyPort -> engine" -ForegroundColor Green
         }
@@ -146,8 +155,13 @@ function Show-Status {
 
     if (Test-Path $Tailscale) {
         $ip = (& $Tailscale ip -4 2>$null | Select-Object -First 1)
-        $serve = & $Tailscale serve status 2>&1 | Out-String
-        if ($ip -and ($serve -match "proxy")) {
+        $listening = @()
+        try {
+            $cfg = & $Tailscale serve status --json 2>$null | ConvertFrom-Json
+            if ($cfg.TCP) { $listening = $cfg.TCP.PSObject.Properties.Name }
+        } catch { }
+        if ($ip -and $listening.Count) {
+            Write-Host "`nTailnet ports listening: $($listening -join ', ')" -ForegroundColor DarkGray
             Write-Host "`nFrom any other machine on the tailnet" -ForegroundColor Cyan
             Write-Host "  Portal, the app       http://${ip}:$PortalPort/"
             Write-Host "  Portal, API docs      http://${ip}:$PortalPort/docs"
