@@ -8,9 +8,13 @@
 #   .\dev.ps1 status    what is running, and the URLs to open
 #   .\dev.ps1 restart
 #
-# The engine is started first because the portal calls it. Both bind to
-# 127.0.0.1 only: the sole route in from another machine is Tailscale, so
-# nothing is exposed on the local Wi-Fi.
+# The engine is started first because the portal calls it.
+#
+# The engine binds to 127.0.0.1 only: it is expensive to call and the portal is
+# the only thing that needs it. The portal binds to every interface so that a
+# second machine can reach it, but a firewall rule limits that to the Private
+# profile, which is the Tailscale adapter. The Wi-Fi adapter is classified
+# Public and stays closed, so nothing is exposed on the local network.
 
 param([Parameter(Position = 0)][string]$Action = "status")
 
@@ -64,7 +68,7 @@ function Start-Services {
         $portalCmd = "cd '$Root\campaign-portal'; " +
             "`$env:ADMIN_TOKEN='$token'; " +
             "`$env:ENGINE_URL='http://localhost:$EnginePort'; " +
-            "python -m uvicorn app.main:app --port $PortalPort"
+            "python -m uvicorn app.main:app --host 0.0.0.0 --port $PortalPort"
         Start-Process powershell -ArgumentList "-NoExit", "-Command", $portalCmd
         Wait-ForPort $PortalPort "portal" | Out-Null
     }
@@ -118,10 +122,12 @@ function Show-Status {
         $ip = (& $Tailscale ip -4 2>$null | Select-Object -First 1)
         if ($ip) {
             Write-Host "`nOpen from another machine on the tailnet" -ForegroundColor Cyan
-            Write-Host "  http://${ip}:8080        <- use this one first"
-            Write-Host "  http://${ip}"
-            Write-Host "  An address with an explicit port stops the browser" -ForegroundColor DarkGray
-            Write-Host "  upgrading it to HTTPS, which this tailnet cannot serve." -ForegroundColor DarkGray
+            Write-Host "  http://${ip}:$PortalPort     <- try this one first"
+            Write-Host "  http://${ip}:8080         via the Tailscale proxy"
+            Write-Host "  http://${ip}              same, on port 80"
+            Write-Host "  Always an IP with an explicit port. A bare hostname gets" -ForegroundColor DarkGray
+            Write-Host "  upgraded to HTTPS by the browser, and this tailnet cannot" -ForegroundColor DarkGray
+            Write-Host "  issue TLS certificates, so that form fails silently." -ForegroundColor DarkGray
         }
     }
 
