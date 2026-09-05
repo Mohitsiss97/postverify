@@ -10,11 +10,12 @@
 #
 # The engine is started first because the portal calls it.
 #
-# The engine binds to 127.0.0.1 only: it is expensive to call and the portal is
-# the only thing that needs it. The portal binds to every interface so that a
-# second machine can reach it, but a firewall rule limits that to the Private
-# profile, which is the Tailscale adapter. The Wi-Fi adapter is classified
-# Public and stays closed, so nothing is exposed on the local network.
+# Both bind to 127.0.0.1 only. Every route in from another machine is a
+# Tailscale proxy, which matters for a reason that cost an afternoon: a service
+# bound to 0.0.0.0 has to be let through the Windows firewall, whereas a
+# Tailscale proxy is served by tailscaled, which is already allowed. Routing
+# through tailscaled takes the firewall out of the path entirely, and keeps the
+# services off the local Wi-Fi at the same time.
 
 param([Parameter(Position = 0)][string]$Action = "status")
 
@@ -68,7 +69,7 @@ function Start-Services {
         $portalCmd = "cd '$Root\campaign-portal'; " +
             "`$env:ADMIN_TOKEN='$token'; " +
             "`$env:ENGINE_URL='http://localhost:$EnginePort'; " +
-            "python -m uvicorn app.main:app --host 0.0.0.0 --port $PortalPort"
+            "python -m uvicorn app.main:app --port $PortalPort"
         Start-Process powershell -ArgumentList "-NoExit", "-Command", $portalCmd
         Wait-ForPort $PortalPort "portal" | Out-Null
     }
@@ -77,9 +78,11 @@ function Start-Services {
     # configuration was cleared.
     if (Test-Path $Tailscale) {
         $serve = & $Tailscale serve status 2>&1 | Out-String
-        if ($serve -notmatch "8080") {
-            & $Tailscale serve --bg --http=8080 "http://127.0.0.1:$PortalPort" | Out-Null
-            Write-Host "  tailscale proxy re-applied on 8080 (portal)" -ForegroundColor Green
+        foreach ($p in @($PortalPort, 8080)) {
+            if ($serve -notmatch ":$p") {
+                & $Tailscale serve --bg --http=$p "http://127.0.0.1:$PortalPort" | Out-Null
+                Write-Host "  tailscale proxy re-applied on $p (portal)" -ForegroundColor Green
+            }
         }
         # The engine binds to 127.0.0.1, so this proxy is the only way to reach
         # its API from another machine, and it stays tailnet-only.
@@ -135,10 +138,11 @@ function Show-Status {
             Write-Host "  Engine, readiness        http://${ip}:8201/ready"
             Write-Host "  Portal, spare routes     http://${ip}:8080/  and  http://${ip}/"
             Write-Host ""
-            Write-Host "  Always an IP with an explicit port. A bare hostname gets" -ForegroundColor DarkGray
-            Write-Host "  upgraded to HTTPS by the browser, and this tailnet cannot" -ForegroundColor DarkGray
-            Write-Host "  issue TLS certificates, so that form fails silently." -ForegroundColor DarkGray
-            Write-Host "  The engine is reachable on the tailnet only, never on Wi-Fi." -ForegroundColor DarkGray
+            Write-Host "  Every one of these is served by tailscaled, not by the app," -ForegroundColor DarkGray
+            Write-Host "  so the Windows firewall is not in the path and nothing is" -ForegroundColor DarkGray
+            Write-Host "  reachable from the local Wi-Fi." -ForegroundColor DarkGray
+            Write-Host "  Always an IP with an explicit port: a bare hostname gets" -ForegroundColor DarkGray
+            Write-Host "  upgraded to HTTPS, which this tailnet cannot serve." -ForegroundColor DarkGray
         }
     }
 
