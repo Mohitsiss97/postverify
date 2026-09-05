@@ -79,7 +79,13 @@ function Start-Services {
         $serve = & $Tailscale serve status 2>&1 | Out-String
         if ($serve -notmatch "8080") {
             & $Tailscale serve --bg --http=8080 "http://127.0.0.1:$PortalPort" | Out-Null
-            Write-Host "  tailscale proxy re-applied on 8080" -ForegroundColor Green
+            Write-Host "  tailscale proxy re-applied on 8080 (portal)" -ForegroundColor Green
+        }
+        # The engine binds to 127.0.0.1, so this proxy is the only way to reach
+        # its API from another machine, and it stays tailnet-only.
+        if ($serve -notmatch "8201") {
+            & $Tailscale serve --bg --http=8201 "http://127.0.0.1:$EnginePort" | Out-Null
+            Write-Host "  tailscale proxy re-applied on 8201 (engine)" -ForegroundColor Green
         }
     }
     Show-Status
@@ -121,13 +127,18 @@ function Show-Status {
     if (Test-Path $Tailscale) {
         $ip = (& $Tailscale ip -4 2>$null | Select-Object -First 1)
         if ($ip) {
-            Write-Host "`nOpen from another machine on the tailnet" -ForegroundColor Cyan
-            Write-Host "  http://${ip}:$PortalPort     <- try this one first"
-            Write-Host "  http://${ip}:8080         via the Tailscale proxy"
-            Write-Host "  http://${ip}              same, on port 80"
+            Write-Host "`nFrom another machine on the tailnet" -ForegroundColor Cyan
+            Write-Host "  Portal, the app          http://${ip}:$PortalPort/"
+            Write-Host "  Portal, API docs         http://${ip}:$PortalPort/docs"
+            Write-Host "  Portal, readiness        http://${ip}:$PortalPort/ready"
+            Write-Host "  Engine, API docs         http://${ip}:8201/docs"
+            Write-Host "  Engine, readiness        http://${ip}:8201/ready"
+            Write-Host "  Portal, spare routes     http://${ip}:8080/  and  http://${ip}/"
+            Write-Host ""
             Write-Host "  Always an IP with an explicit port. A bare hostname gets" -ForegroundColor DarkGray
             Write-Host "  upgraded to HTTPS by the browser, and this tailnet cannot" -ForegroundColor DarkGray
             Write-Host "  issue TLS certificates, so that form fails silently." -ForegroundColor DarkGray
+            Write-Host "  The engine is reachable on the tailnet only, never on Wi-Fi." -ForegroundColor DarkGray
         }
     }
 
