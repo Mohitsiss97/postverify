@@ -29,3 +29,4 @@ Thumbs.db
 campaign-portal/campaign_portal.db*
 campaign-portal/storage/
 .admin-token.txt
+logs/

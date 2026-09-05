@@ -3,30 +3,37 @@
 # This is a development convenience only. Production runs the containers in
 # campaign-portal/docker-compose.yml; see docs/deployment.md.
 #
-#   .\dev.ps1 start     both services, plus the Tailscale proxy
-#   .\dev.ps1 stop      both services (the Tailscale proxy is left alone)
-#   .\dev.ps1 status    what is running, and the URLs to open
-#   .\dev.ps1 restart
+#   .\dev.ps1 start | stop | restart | status | logs
 #
-# The engine is started first because the portal calls it.
+# Two decisions here were paid for the hard way.
 #
-# Both bind to 127.0.0.1 only. Every route in from another machine is a
-# Tailscale proxy, which matters for a reason that cost an afternoon: a service
-# bound to 0.0.0.0 has to be let through the Windows firewall, whereas a
-# Tailscale proxy is served by tailscaled, which is already allowed. Routing
-# through tailscaled takes the firewall out of the path entirely, and keeps the
-# services off the local Wi-Fi at the same time.
+# Both services bind to 127.0.0.1 and every route in from another machine is a
+# Tailscale proxy. A service bound to 0.0.0.0 has to be let through the Windows
+# firewall, and that stayed unreachable even with an Allow rule in place and the
+# Tailscale adapter classified Private. Traffic through tailscaled takes the
+# firewall out of the path entirely, because tailscaled has been allowed since
+# it was installed. It also keeps both services off the local Wi-Fi.
+#
+# The services run hidden with their output redirected to logs/, rather than in
+# console windows. Windows are easy to close by accident, and when they close
+# the services die silently everywhere at once — which looks exactly like a
+# network fault and is not one.
 
 param([Parameter(Position = 0)][string]$Action = "status")
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
+$LogDir = Join-Path $Root "logs"
 $EnginePort = 8200
 $PortalPort = 8300
+$ProxyPorts = @(8300, 8080)      # tailnet ports that reach the portal
+$EngineProxyPort = 8201          # tailnet port that reaches the engine
 
 function Get-PidOnPort($Port) {
-    $line = netstat -ano | Select-String ":$Port\s.*LISTENING" | Select-Object -First 1
+    # Loopback only. The tailnet listener on the same port belongs to
+    # tailscaled, and killing that takes Tailscale itself down.
+    $line = netstat -ano | Select-String "127\.0\.0\.1:$Port\s.*LISTENING" | Select-Object -First 1
     if ($line) { ($line -split '\s+')[-1] } else { $null }
 }
 
@@ -39,63 +46,60 @@ function Wait-ForPort($Port, $Name, $Seconds = 45) {
     for ($i = 0; $i -lt $Seconds; $i++) {
         try {
             Invoke-WebRequest "http://127.0.0.1:$Port/health" -TimeoutSec 3 -UseBasicParsing | Out-Null
-            Write-Host "  $Name is up on $Port" -ForegroundColor Green
+            Write-Host "  $Name up on $Port" -ForegroundColor Green
             return $true
         } catch { Start-Sleep -Seconds 1 }
     }
-    Write-Host "  $Name did not come up on $Port" -ForegroundColor Red
-    Write-Host "  Its window is still open; read the error there." -ForegroundColor Yellow
+    Write-Host "  $Name did not start on $Port" -ForegroundColor Red
+    Write-Host "  Run '.\dev.ps1 logs' to see why." -ForegroundColor Yellow
     return $false
 }
 
+function Start-One($Name, $Dir, $Port) {
+    if (Get-PidOnPort $Port) {
+        Write-Host "  $Name already running on $Port" -ForegroundColor DarkGray
+        return
+    }
+    Start-Process -FilePath "python" `
+        -ArgumentList "-m", "uvicorn", "app.main:app", "--port", $Port `
+        -WorkingDirectory (Join-Path $Root $Dir) `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $LogDir "$Name.log") `
+        -RedirectStandardError  (Join-Path $LogDir "$Name.err.log")
+    Wait-ForPort $Port $Name | Out-Null
+}
+
 function Start-Services {
-    if (Get-PidOnPort $EnginePort) {
-        Write-Host "  engine already running on $EnginePort" -ForegroundColor DarkGray
-    } else {
-        # Each service gets its own window so its log stays readable and either
-        # can be restarted without disturbing the other.
-        Start-Process powershell -ArgumentList "-NoExit", "-Command",
-            "cd '$Root\postverify-api'; python -m uvicorn app.main:app --port $EnginePort"
-        Wait-ForPort $EnginePort "engine" | Out-Null
-    }
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-    if (Get-PidOnPort $PortalPort) {
-        Write-Host "  portal already running on $PortalPort" -ForegroundColor DarkGray
-    } else {
-        $token = Get-AdminToken
-        # Built as one string first: inside an -ArgumentList array, a trailing
-        # "+" is read as another positional argument rather than as
-        # concatenation.
-        $portalCmd = "cd '$Root\campaign-portal'; " +
-            "`$env:ADMIN_TOKEN='$token'; " +
-            "`$env:ENGINE_URL='http://localhost:$EnginePort'; " +
-            "python -m uvicorn app.main:app --port $PortalPort"
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", $portalCmd
-        Wait-ForPort $PortalPort "portal" | Out-Null
-    }
+    # The engine first: the portal calls it, and reports it as down until it is
+    # up.
+    Start-One "engine" "postverify-api" $EnginePort
 
-    # The proxy survives reboots on its own, so this only re-applies it if the
-    # configuration was cleared.
+    # Set on this process so the child inherits them; Start-Process has no way
+    # to pass environment variables directly.
+    $env:ADMIN_TOKEN = Get-AdminToken
+    $env:ENGINE_URL = "http://localhost:$EnginePort"
+    Start-One "portal" "campaign-portal" $PortalPort
+
     if (Test-Path $Tailscale) {
         $serve = & $Tailscale serve status 2>&1 | Out-String
-        foreach ($p in @($PortalPort, 8080)) {
-            if ($serve -notmatch ":$p") {
+        foreach ($p in $ProxyPorts) {
+            if ($serve -notmatch ":$p\b") {
                 & $Tailscale serve --bg --http=$p "http://127.0.0.1:$PortalPort" | Out-Null
-                Write-Host "  tailscale proxy re-applied on $p (portal)" -ForegroundColor Green
+                Write-Host "  tailnet proxy on $p -> portal" -ForegroundColor Green
             }
         }
-        # The engine binds to 127.0.0.1, so this proxy is the only way to reach
-        # its API from another machine, and it stays tailnet-only.
-        if ($serve -notmatch "8201") {
-            & $Tailscale serve --bg --http=8201 "http://127.0.0.1:$EnginePort" | Out-Null
-            Write-Host "  tailscale proxy re-applied on 8201 (engine)" -ForegroundColor Green
+        if ($serve -notmatch ":$EngineProxyPort\b") {
+            & $Tailscale serve --bg --http=$EngineProxyPort "http://127.0.0.1:$EnginePort" | Out-Null
+            Write-Host "  tailnet proxy on $EngineProxyPort -> engine" -ForegroundColor Green
         }
     }
     Show-Status
 }
 
 function Stop-Services {
-    foreach ($p in @($PortalPort, $EnginePort)) {     # portal first: it calls the engine
+    foreach ($p in @($PortalPort, $EnginePort)) {   # portal first: it calls the engine
         $procId = Get-PidOnPort $p
         if ($procId) {
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
@@ -104,45 +108,57 @@ function Stop-Services {
             Write-Host "  nothing on $p" -ForegroundColor DarkGray
         }
     }
-    Write-Host "`n  The Tailscale proxy is left in place. To remove it:" -ForegroundColor DarkGray
-    Write-Host "    tailscale serve --http=8080 off" -ForegroundColor DarkGray
+    Write-Host "`n  The tailnet proxies stay in place. To remove them:" -ForegroundColor DarkGray
+    Write-Host "    tailscale serve reset" -ForegroundColor DarkGray
+}
+
+function Show-Logs {
+    foreach ($n in @("engine", "portal")) {
+        foreach ($suffix in @(".log", ".err.log")) {
+            $f = Join-Path $LogDir "$n$suffix"
+            if ((Test-Path $f) -and (Get-Item $f).Length -gt 0) {
+                Write-Host "`n--- $n$suffix (last 15 lines) ---" -ForegroundColor Cyan
+                Get-Content $f -Tail 15
+            }
+        }
+    }
+    Write-Host ""
 }
 
 function Show-Status {
     Write-Host "`nServices" -ForegroundColor Cyan
     foreach ($s in @(@{n = "engine"; p = $EnginePort }, @{n = "portal"; p = $PortalPort })) {
         $procId = Get-PidOnPort $s.p
-        if ($procId) {
-            try {
-                $r = Invoke-WebRequest "http://127.0.0.1:$($s.p)/ready" -TimeoutSec 20 -UseBasicParsing
-                Write-Host ("  {0,-7} {1}  ready" -f $s.n, $s.p) -ForegroundColor Green
-            } catch {
-                Write-Host ("  {0,-7} {1}  running, not ready" -f $s.n, $s.p) -ForegroundColor Yellow
-            }
-        } else {
+        if (-not $procId) {
             Write-Host ("  {0,-7} {1}  down" -f $s.n, $s.p) -ForegroundColor Red
+            continue
+        }
+        try {
+            Invoke-WebRequest "http://127.0.0.1:$($s.p)/ready" -TimeoutSec 20 -UseBasicParsing | Out-Null
+            Write-Host ("  {0,-7} {1}  ready   (pid {2})" -f $s.n, $s.p, $procId) -ForegroundColor Green
+        } catch {
+            Write-Host ("  {0,-7} {1}  running, not ready (pid {2})" -f $s.n, $s.p, $procId) -ForegroundColor Yellow
         }
     }
 
-    Write-Host "`nOpen from this machine" -ForegroundColor Cyan
-    Write-Host "  http://localhost:$PortalPort"
+    Write-Host "`nOn this machine" -ForegroundColor Cyan
+    Write-Host "  http://localhost:$PortalPort/"
 
     if (Test-Path $Tailscale) {
         $ip = (& $Tailscale ip -4 2>$null | Select-Object -First 1)
-        if ($ip) {
-            Write-Host "`nFrom another machine on the tailnet" -ForegroundColor Cyan
-            Write-Host "  Portal, the app          http://${ip}:$PortalPort/"
-            Write-Host "  Portal, API docs         http://${ip}:$PortalPort/docs"
-            Write-Host "  Portal, readiness        http://${ip}:$PortalPort/ready"
-            Write-Host "  Engine, API docs         http://${ip}:8201/docs"
-            Write-Host "  Engine, readiness        http://${ip}:8201/ready"
-            Write-Host "  Portal, spare routes     http://${ip}:8080/  and  http://${ip}/"
+        $serve = & $Tailscale serve status 2>&1 | Out-String
+        if ($ip -and ($serve -match "proxy")) {
+            Write-Host "`nFrom any other machine on the tailnet" -ForegroundColor Cyan
+            Write-Host "  Portal, the app       http://${ip}:$PortalPort/"
+            Write-Host "  Portal, API docs      http://${ip}:$PortalPort/docs"
+            Write-Host "  Engine, API docs      http://${ip}:$EngineProxyPort/docs"
+            Write-Host "  Portal, spare route   http://${ip}:8080/"
             Write-Host ""
-            Write-Host "  Every one of these is served by tailscaled, not by the app," -ForegroundColor DarkGray
-            Write-Host "  so the Windows firewall is not in the path and nothing is" -ForegroundColor DarkGray
-            Write-Host "  reachable from the local Wi-Fi." -ForegroundColor DarkGray
-            Write-Host "  Always an IP with an explicit port: a bare hostname gets" -ForegroundColor DarkGray
-            Write-Host "  upgraded to HTTPS, which this tailnet cannot serve." -ForegroundColor DarkGray
+            Write-Host "  Use the IP with an explicit port. A bare hostname gets" -ForegroundColor DarkGray
+            Write-Host "  upgraded to HTTPS by the browser, and this tailnet has no" -ForegroundColor DarkGray
+            Write-Host "  TLS certificate, so that form fails with nothing on screen." -ForegroundColor DarkGray
+        } elseif ($ip) {
+            Write-Host "`nNo tailnet proxy configured. Run '.\dev.ps1 start'." -ForegroundColor Yellow
         }
     }
 
@@ -157,9 +173,8 @@ function Show-Status {
 switch ($Action.ToLower()) {
     "start" { Start-Services }
     "stop" { Stop-Services }
-    "restart" { Stop-Services; Start-Sleep -Seconds 2; Start-Services }
+    "restart" { Stop-Services; Start-Sleep -Seconds 3; Start-Services }
     "status" { Show-Status }
-    default {
-        Write-Host "Usage: .\dev.ps1 [start|stop|restart|status]"
-    }
+    "logs" { Show-Logs }
+    default { Write-Host "Usage: .\dev.ps1 [start|stop|restart|status|logs]" }
 }
